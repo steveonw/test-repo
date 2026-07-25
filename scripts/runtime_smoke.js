@@ -115,29 +115,36 @@ async function waitForHealth(base, timeoutMs) {
     );
     check('render completes', true);
 
-    // 4. WAV export produces a valid file (also proves blob downloads survive CSP)
-    const [wavDl] = await Promise.all([
-      page.waitForEvent('download', {timeout: 60000}),
-      page.click('#exportButton'),
-    ]);
-    const wavPath = path.join(outDir, 'smoke.wav');
-    await wavDl.saveAs(wavPath);
-    const wav = fs.readFileSync(wavPath);
-    check('WAV has RIFF/WAVE header and audio data',
+    // 4. WAV export lands on the drive via /api/save — this proves the whole
+    // browser → launcher → disk round trip, which is the Phase 4 contract:
+    // nothing goes to the host's Downloads folder when the drive is writable.
+    const driveRoot = path.dirname(path.resolve(sharedDir));
+    const waitForDriveFile = async (p, timeoutMs) => {
+      const t0 = Date.now();
+      let lastSize = -1;
+      for (;;) {
+        let size = 0;
+        try { size = fs.statSync(p).size; } catch (_) { size = 0; }
+        if (size > 0 && size === lastSize) return fs.readFileSync(p); // stable across two polls
+        lastSize = size;
+        if (Date.now() - t0 > timeoutMs) throw new Error(`timed out waiting for ${p}`);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    };
+    await page.click('#exportButton');
+    const wav = await waitForDriveFile(path.join(driveRoot, 'saves', 'audio', 'read-aloud-narration.wav'), 60000);
+    fs.writeFileSync(path.join(outDir, 'smoke.wav'), wav);
+    check('WAV saved to the drive with RIFF/WAVE header and audio data',
       wav.length > 2000 && wav.toString('ascii', 0, 4) === 'RIFF' && wav.toString('ascii', 8, 12) === 'WAVE',
       `${wav.length} bytes`);
 
-    // 5. MP3 export via the lamejs worker
-    const [mp3Dl] = await Promise.all([
-      page.waitForEvent('download', {timeout: 120000}),
-      page.click('#exportMp3Button'),
-    ]);
-    const mp3Path = path.join(outDir, 'smoke.mp3');
-    await mp3Dl.saveAs(mp3Path);
-    const mp3 = fs.readFileSync(mp3Path);
+    // 5. MP3 export via the lamejs worker, also landing on the drive
+    await page.click('#exportMp3Button');
+    const mp3 = await waitForDriveFile(path.join(driveRoot, 'saves', 'audio', 'read-aloud-narration.mp3'), 120000);
+    fs.writeFileSync(path.join(outDir, 'smoke.mp3'), mp3);
     const mp3Ok = mp3.length > 500 &&
       ((mp3[0] === 0xff && (mp3[1] & 0xe0) === 0xe0) || mp3.toString('ascii', 0, 3) === 'ID3');
-    check('MP3 has frame sync and data', mp3Ok, `${mp3.length} bytes, ${mp3[0]},${mp3[1]}`);
+    check('MP3 saved to the drive with frame sync and data', mp3Ok, `${mp3.length} bytes, ${mp3[0]},${mp3[1]}`);
 
     // 6. Theme / focus / hidden cascade in a real engine (the shipped-bug class)
     await page.screenshot({path: path.join(outDir, 'light.png'), fullPage: true});
