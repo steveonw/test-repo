@@ -85,6 +85,17 @@ function makeWorld(preSeed) {
       ], invalid: []};
       return Promise.resolve({ok: true, json: () => Promise.resolve(catalog), text: () => Promise.resolve('')});
     }
+    if (String(url) === '/api/save' && opts && opts.method === 'POST') {
+      if (world.failSaves) return Promise.resolve({ok: false, status: 507, json: () => Promise.resolve({error: 'the drive is write-protected, so the file could not be saved'})});
+      const req = JSON.parse(opts.body);
+      world.saves = world.saves || [];
+      world.saves.push(req);
+      return Promise.resolve({ok: true, json: () => Promise.resolve({saved: `saves/${req.kind}/${req.name}`})});
+    }
+    if (String(url) === '/api/autosave') {
+      if (world.autosaveFile) return Promise.resolve({ok: true, text: () => Promise.resolve(world.autosaveFile)});
+      return Promise.resolve({ok: false, status: 404, text: () => Promise.resolve('no autosave')});
+    }
     if (String(url) === '/health') {
       return Promise.resolve({ok: true, text: () => Promise.resolve(world.healthText || 'readaloud:abc\nintegrity:ok:9')});
     }
@@ -102,6 +113,9 @@ function makeWorld(preSeed) {
   })();
 }
 const tick = () => new Promise(r => setTimeout(r, 0));
+const settle = async (n = 8) => { for (let i = 0; i < n; i++) await tick(); };
+const lastSave = (world, kind) => (world.saves || []).filter((x) => x.kind === kind).slice(-1)[0];
+const saveBuf = (world, kind) => Buffer.from(lastSave(world, kind).dataBase64, 'base64');
 const results = [];
 const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  detail:', x); };
 
@@ -193,9 +207,11 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     $('renderButton').click(); await tick(); await drain(1);
     check('update sent exactly the edited sentence', world.workerInstance.received.length === before + 1 && world.workerInstance.received[before].text === 'Second sentence EDITED.');
     check('update reports 2 reused', $('statusDetail').textContent.includes('2 reused'), $('statusDetail').textContent);
-    $('exportButton').click(); await tick();
-    check('export produced a wav blob', world.exportedBlob !== null && world.exportedBlob.type === 'audio/wav');
-    const buf = Buffer.from(await world.exportedBlob.arrayBuffer());
+    $('exportButton').click(); await settle();
+    check('export saved a wav to the drive',
+      lastSave(world, 'audio') !== undefined && lastSave(world, 'audio').name === 'read-aloud-narration.wav' &&
+      $('statusDetail').textContent.includes('saves/audio/'), $('statusDetail').textContent);
+    const buf = saveBuf(world, 'audio');
     const SENT = Math.round(22050 * 0.35), PARA = Math.round(22050 * 0.75);
     const expected = 100 + SENT + 100 + PARA + 100;
     check('WAV header + rate', buf.toString('ascii', 0, 4) === 'RIFF' && buf.readUInt32LE(24) === 22050);
@@ -286,9 +302,8 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     // both sentences already cached from playback: render correctly has nothing
     // to do (disabled) and export is available immediately
     check('playback cache satisfies narration directly', $('renderButton').disabled && !$('exportButton').disabled, $('narrationInfo').textContent);
-    world.exportedBlob = null;
-    $('exportButton').click(); await tick();
-    const buf2 = Buffer.from(await world.exportedBlob.arrayBuffer());
+    $('exportButton').click(); await settle();
+    const buf2 = saveBuf(world, 'audio');
     const expected2 = 8 + Math.round(22050 * 0.15) + 8;
     check('export gap follows slider', buf2.length === 44 + expected2 * 2, buf2.length);
   }
@@ -365,10 +380,9 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     // F10 jump + report
     key('F10');
     check('F10 selects the flagged sentence', draft.value.slice(draft.selectionStart, draft.selectionEnd) === 'Gamma three.', draft.value.slice(draft.selectionStart, draft.selectionEnd));
-    world.blobs.length = 0;
-    $('flagReportButton').click();
-    const report = await blobText(world.blobs[0]);
-    check('flag report downloads with sentence', report.includes('Flagged sentences (1)') && report.includes('Gamma three.'));
+    $('flagReportButton').click(); await settle();
+    const report = saveBuf(world, 'report').toString('utf8');
+    check('flag report saved to drive with sentence', report.includes('Flagged sentences (1)') && report.includes('Gamma three.'));
     $('flagClearButton').click();
     check('clear flags hides row', $('flagsRow').hidden);
 
@@ -399,16 +413,15 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     $('exportMp3Button').click(); await tick();
     check('mp3 worker receives pcm', world.mp3Worker !== null && world.mp3Worker.received[0].pcm instanceof w.Int16Array === false /* transferred as Int16Array (node realm) */ || world.mp3Worker.received[0].sampleRate === 22050);
     world.mp3Worker.onmessage({data: {type: 'done', chunks: [new Int8Array([0xff, 0xfb, 0x90])]}});
-    await tick(); await tick();
-    const mp3Blob = world.blobs.find((b) => b.type === 'audio/mpeg');
-    const labelBlob = world.blobs.find((b) => b.type === 'text/plain');
-    check('mp3 blob downloaded', mp3Blob !== undefined && $('statusTitle').textContent === 'MP3 exported', $('statusTitle').textContent);
-    check('labels file downloaded alongside', labelBlob !== undefined && (await blobText(labelBlob)).includes('\tFirst bit.'));
+    await settle();
+    const mp3Save = lastSave(world, 'audio');
+    const labelSave = lastSave(world, 'text');
+    check('mp3 saved to drive', mp3Save !== undefined && mp3Save.name === 'read-aloud-narration.mp3');
+    check('labels saved alongside', labelSave !== undefined && Buffer.from(labelSave.dataBase64, 'base64').toString('utf8').includes('\tFirst bit.'));
 
     // --- session save ---
-    world.blobs.length = 0;
-    $('sessionSave').click();
-    const session = JSON.parse(await blobText(world.blobs[0]));
+    $('sessionSave').click(); await settle();
+    const session = JSON.parse(saveBuf(world, 'session').toString('utf8'));
     check('session file contains draft + settings', session.kind === 'read-aloud-session' && session.draft === draft.value && session.settings.speed === 1.25);
 
     // --- quit ---
@@ -518,9 +531,8 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     await new Promise((r) => setTimeout(r, 60));
     const lostItem = $('flagPanel').querySelector('li.flag-lost');
     check('panel: deleted sentence shows as not found', lostItem !== null && lostItem.textContent.includes('not found'), $('flagPanel').textContent);
-    world.blobs.length = 0;
-    $('flagReportButton').click();
-    const report = Buffer.from(await world.blobs[0].arrayBuffer()).toString('utf8');
+    $('flagReportButton').click(); await settle();
+    const report = saveBuf(world, 'report').toString('utf8');
     check('panel: report marks lost flags', report.includes('[no longer found in the draft]'), report);
 
     // per-item remove button
@@ -534,9 +546,8 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
     draft.setSelectionRange(0, 0);
     key('F9'); await tick();
-    world.blobs.length = 0;
-    $('sessionSave').click();
-    const session = JSON.parse(Buffer.from(await world.blobs[0].arrayBuffer()).toString('utf8'));
+    $('sessionSave').click(); await settle();
+    const session = JSON.parse(saveBuf(world, 'session').toString('utf8'));
     check('panel: session stores anchored flags', Array.isArray(session.flags) && session.flags[0].text === 'Alpha sentence one.' && 'after' in session.flags[0], JSON.stringify(session.flags));
   }
 
@@ -770,8 +781,8 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     $('pitch').dispatchEvent(new w.Event('input', {bubbles: true}));
     $('renderButton').click(); await tick();
     sendResult(); await tick(); await tick();
-    $('exportButton').click(); await tick();
-    const buf = Buffer.from(await world.exportedBlob.arrayBuffer());
+    $('exportButton').click(); await settle();
+    const buf = saveBuf(world, 'audio');
     check('tuning: exported WAV is resampled by the pitch factor',
       buf.length === 44 + Math.round(100 / 1.15) * 2, `bytes=${buf.length}`);
     $('pitch').value = '1.00';
@@ -813,6 +824,112 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     $('voiceSelect').dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
     world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 8}});
     check('tuning: kitten hides the delivery toggle', $('deliveryRow').hidden === true);
+  }
+
+  /* ============ files, autosave, restore ============ */
+  {
+    const world = await makeWorld((wd) => {
+      wd.w.__RA_AUTOSAVE_MS = 25;
+      wd.w.navigator.clipboard = {writeText: (t) => { wd.copied = t; return Promise.resolve(); }};
+    });
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: k}));
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    const draft = $('draft');
+
+    check('files: no autosave file means no restore banner', $('restoreBanner').hidden === true);
+
+    draft.value = 'Words to keep. More words here.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    $('copyAllButton').click(); await settle();
+    check('files: copy all puts the draft on the clipboard', world.copied === draft.value && /Copied/.test($('statusTitle').textContent), $('statusTitle').textContent);
+
+    $('saveTxtButton').click(); await settle();
+    check('files: draft saved as text on the drive',
+      lastSave(world, 'text') !== undefined && lastSave(world, 'text').name === 'read-aloud-draft.txt' &&
+      saveBuf(world, 'text').toString('utf8') === draft.value, JSON.stringify(lastSave(world, 'text')));
+
+    // autosave: off by default, indicator appears, interval writes, stop writes
+    check('files: autosave defaults off with hidden indicator', !$('autosaveToggle').checked && $('autosaveDot').hidden === true);
+    $('autosaveToggle').checked = true;
+    $('autosaveToggle').dispatchEvent(new w.Event('input', {bubbles: true}));
+    check('files: indicator visible while autosave is on', $('autosaveDot').hidden === false);
+    await new Promise((r) => setTimeout(r, 80)); await settle();
+    const autosaves = (world.saves || []).filter((x) => x.name === 'autosave.raSession');
+    check('files: autosave writes the rolling session on the drive', autosaves.length >= 1 &&
+      JSON.parse(Buffer.from(autosaves[0].dataBase64, 'base64').toString('utf8')).draft === draft.value, `count=${autosaves.length}`);
+    const beforeStop = (world.saves || []).filter((x) => x.name === 'autosave.raSession').length;
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    draft.setSelectionRange(0, 0);
+    key('F8'); await tick();
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-result', samples: new Float32Array(8), sampleRate: 22050}});
+    await tick(); await tick();
+    key('Escape'); await settle();
+    check('files: stopping playback triggers an autosave',
+      (world.saves || []).filter((x) => x.name === 'autosave.raSession').length > beforeStop);
+    $('autosaveToggle').checked = false;
+    $('autosaveToggle').dispatchEvent(new w.Event('input', {bubbles: true}));
+    check('files: indicator hides when autosave turns off', $('autosaveDot').hidden === true);
+
+    // drive failure: the save falls back to a download and says so
+    world.failSaves = true;
+    world.blobs.length = 0;
+    $('saveTxtButton').click(); await settle();
+    check('files: unreachable drive falls back to a download and says where',
+      world.blobs.length === 1 && /Downloads folder/.test($('statusDetail').textContent), $('statusDetail').textContent);
+    world.failSaves = false;
+
+    // drag-drop: clean draft imports directly; wrong extension refused
+    draft.value = '';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    const drop = (file) => {
+      const ev = new w.Event('drop', {bubbles: true, cancelable: true});
+      ev.dataTransfer = {files: [file]};
+      draft.dispatchEvent(ev);
+    };
+    drop(new w.File(['Dropped draft text.'], 'chapter.md', {type: 'text/markdown'})); await settle();
+    check('files: dropped markdown imported into memory', draft.value === 'Dropped draft text.' && /Opened chapter\.md/.test($('statusTitle').textContent), $('statusTitle').textContent);
+    drop(new w.File(['x'], 'photo.png', {type: 'image/png'})); await settle();
+    check('files: non-text drop refused', draft.value === 'Dropped draft text.' && /cannot be opened/.test($('statusTitle').textContent), $('statusTitle').textContent);
+
+    // dirty draft: import waits for the banner decision
+    draft.value = 'Unsaved precious work.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    drop(new w.File(['Replacement text.'], 'new.txt', {type: 'text/plain'})); await settle();
+    check('files: dirty draft raises the replace banner instead of importing',
+      $('importBanner').hidden === false && draft.value === 'Unsaved precious work.', draft.value);
+    $('importNo').click();
+    check('files: cancel keeps the draft', $('importBanner').hidden === true && draft.value === 'Unsaved precious work.');
+    drop(new w.File(['Replacement text.'], 'new.txt', {type: 'text/plain'})); await settle();
+    $('importYes').click(); await tick();
+    check('files: replace applies the dropped file', draft.value === 'Replacement text.');
+  }
+
+  /* ============ autosave restore offer ============ */
+  {
+    const restorable = JSON.stringify({v: 1, kind: 'read-aloud-session', draft: 'Restored words.', flags: [], settings: {v: 1, speed: 1.1}});
+    const world = await makeWorld((wd) => { wd.autosaveFile = restorable; });
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    await settle();
+    check('restore: banner offered when an autosave exists', $('restoreBanner').hidden === false);
+    check('restore: nothing loads without consent', $('draft').value === '');
+    $('restoreYes').click(); await tick();
+    check('restore: restore loads draft and settings', $('draft').value === 'Restored words.' && $('speed').value === '1.1', $('draft').value);
+    check('restore: banner gone after restoring', $('restoreBanner').hidden === true);
+  }
+  {
+    const restorable = JSON.stringify({v: 1, kind: 'read-aloud-session', draft: 'Restored words.', flags: [], settings: {}});
+    const world = await makeWorld((wd) => { wd.autosaveFile = restorable; });
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    await settle();
+    $('restoreNo').click();
+    check('restore: dismiss keeps the draft empty', $('restoreBanner').hidden === true && $('draft').value === '');
   }
 
   const passed = results.filter(r => r[0]).length;

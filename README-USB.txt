@@ -20,6 +20,28 @@ finish, then press "Export WAV." If you edit the draft afterward, pressing
 Keep the shared folder beside the launchers. The tool is fully offline at run
 time and does not upload text.
 
+Where files go
+--------------
+Everything you save — sessions, flag reports, exported WAV/MP3, draft text —
+is written to a "saves" folder on this drive, next to the app. Nothing is
+written to the computer you plug into. If the drive itself cannot be written
+(removed or write-protected), the file falls back to that computer's
+Downloads folder and the status line tells you so.
+
+Autosave is OFF by default. Turning it on (in Settings & sessions) writes a
+rolling session file to this drive once a minute and shows a green indicator
+while active.
+
+One honest note: this tool writes nothing to the host computer, but the
+computer's own features are outside its control — clipboard history (for
+example Win+V on Windows) may retain text you copy or paste, and the
+browser's crash recovery may briefly hold page contents.
+
+Windows first-run note
+----------------------
+Windows SmartScreen may warn about an unsigned app from a USB drive. Click
+"More info", then "Run anyway". A signed release avoids that warning.
+
 macOS first-run note
 --------------------
 A personal unsigned build may require System Settings > Privacy & Security >

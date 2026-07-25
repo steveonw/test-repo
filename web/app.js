@@ -50,6 +50,17 @@ const pitchValue = document.getElementById('pitchValue');
 const deliveryRow = document.getElementById('deliveryRow');
 const deliveryNatural = document.getElementById('deliveryNatural');
 const deliverySteady = document.getElementById('deliverySteady');
+const copyAllButton = document.getElementById('copyAllButton');
+const saveTxtButton = document.getElementById('saveTxtButton');
+const autosaveToggle = document.getElementById('autosaveToggle');
+const autosaveDot = document.getElementById('autosaveDot');
+const restoreBanner = document.getElementById('restoreBanner');
+const restoreYes = document.getElementById('restoreYes');
+const restoreNo = document.getElementById('restoreNo');
+const importBanner = document.getElementById('importBanner');
+const importName = document.getElementById('importName');
+const importYes = document.getElementById('importYes');
+const importNo = document.getElementById('importNo');
 const editorStack = document.querySelector('.editor-stack');
 
 let awaitingStep = false;
@@ -979,7 +990,8 @@ function flagReport() {
     const note = r.state === 'lost' ? ' [no longer found in the draft]' : '';
     return `${i + 1}. ${body}${note}`;
   });
-  downloadText('read-aloud-flags.txt', `Flagged sentences (${flags.size})\n\n` + lines.join('\n\n') + '\n');
+  void saveOrDownload('report', 'read-aloud-flags.txt',
+    new Blob([`Flagged sentences (${flags.size})\n\n` + lines.join('\n\n') + '\n'], {type: 'text/plain'}), 'Flag report saved');
 }
 
 function finishReading() {
@@ -1144,7 +1156,8 @@ function buildNarrationPcm() {
 function maybeExportLabels(labels) {
   if (!labelsToggle.checked || !labels.length) return;
   const lines = labels.map((l) => `${l.t0.toFixed(6)}\t${l.t1.toFixed(6)}\t${l.text}`);
-  downloadText('read-aloud-narration-labels.txt', lines.join('\n') + '\n');
+  void saveOrDownload('text', 'read-aloud-narration-labels.txt',
+    new Blob([lines.join('\n') + '\n'], {type: 'text/plain'}), 'Labels saved');
 }
 
 function exportWav() {
@@ -1172,7 +1185,7 @@ function exportWav() {
   dv.setUint32(40, pcm.length * 2, true);
   new Int16Array(wav, 44).set(pcm);
 
-  downloadBlob(new Blob([wav], {type: 'audio/wav'}), 'read-aloud-narration.wav');
+  void saveOrDownload('audio', 'read-aloud-narration.wav', new Blob([wav], {type: 'audio/wav'}), 'WAV exported');
   maybeExportLabels(labels);
 
   const seconds = Math.round(totalSamples / sampleRate);
@@ -1201,7 +1214,7 @@ function exportMp3() {
       refreshNarrationInfo();
       return;
     }
-    downloadBlob(new Blob(msg.chunks, {type: 'audio/mpeg'}), 'read-aloud-narration.mp3');
+    void saveOrDownload('audio', 'read-aloud-narration.mp3', new Blob(msg.chunks, {type: 'audio/mpeg'}), 'MP3 exported');
     maybeExportLabels(labels);
     const seconds = Math.round(totalSamples / sampleRate);
     const mm = Math.floor(seconds / 60);
@@ -1231,10 +1244,55 @@ function downloadText(name, textContent) {
   downloadBlob(new Blob([textContent], {type: 'text/plain'}), name);
 }
 
+/* ----------------------- Saving to the drive ---------------------- */
+// Design rule: the app never writes to the host computer. All saves go
+// through the launcher to <drive>/saves/<kind>/, next to the app itself.
+// A browser download happens only when the drive cannot be written, and
+// the status line then says exactly where the file went.
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(new Error('could not read the data to save'));
+    r.readAsDataURL(blob);
+  });
+}
+
+async function saveToDrive(kind, name, blob) {
+  const dataBase64 = await blobToBase64(blob);
+  const resp = await fetch('/api/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({kind, name, dataBase64}),
+  });
+  let body = null;
+  try { body = await resp.json(); } catch (_) { /* non-JSON error page */ }
+  if (!resp.ok) throw new Error((body && body.error) || `save failed (${resp.status})`);
+  return (body && body.saved) || `saves/${kind}/${name}`;
+}
+
+async function saveOrDownload(kind, name, blob, doneTitle) {
+  if (openedDirectly || typeof fetch !== 'function') {
+    downloadBlob(blob, name);
+    return false;
+  }
+  try {
+    const rel = await saveToDrive(kind, name, blob);
+    setStatus('ready', doneTitle || 'Saved to the drive', `Written to ${rel} on this drive. Nothing was left on this computer.`);
+    return true;
+  } catch (err) {
+    downloadBlob(blob, name);
+    setStatus('ready', doneTitle || 'Saved', `The drive could not be written (${String(err.message || err)}), so ${name} went to this computer's Downloads folder instead.`);
+    return false;
+  }
+}
+
 /* ----------------------------- Stop ------------------------------ */
 
 function stopAll({restarting = false, keepCaret = false} = {}) {
   if (mode === 'idle' && !currentSource) return;
+  if (!restarting) void autosaveNow();
   const wasPlaying = mode === 'playing';
   const seg = segments[playPos];
   runToken++;
@@ -1536,6 +1594,7 @@ function currentSettings() {
     volume: Number(volume.value),
     pitch: Number(pitch.value),
     delivery: deliveryPreset,
+    autosave: autosaveToggle.checked,
     step: stepToggle.checked,
     focus: focusToggle.checked,
     labels: labelsToggle.checked,
@@ -1563,6 +1622,10 @@ function applySettingsObject(obj) {
   if (obj.font === 'serif' || obj.font === 'hyper') fontSelect.value = obj.font;
   if (obj.theme === 'auto' || obj.theme === 'light' || obj.theme === 'dark') themeSelect.value = obj.theme;
   if (typeof obj.step === 'boolean') stepToggle.checked = obj.step;
+  if (typeof obj.autosave === 'boolean' && obj.autosave !== autosaveToggle.checked) {
+    autosaveToggle.checked = obj.autosave;
+    applyAutosaveState();
+  }
   if (typeof obj.focus === 'boolean') focusToggle.checked = obj.focus;
   if (typeof obj.labels === 'boolean') labelsToggle.checked = obj.labels;
   if (typeof obj.voice === 'string' && /^[a-z0-9-]{1,64}$/.test(obj.voice)) {
@@ -1630,17 +1693,148 @@ function loadSettingsFile() {
     .catch(() => { /* no settings file: perfectly fine */ });
 }
 
-function saveSession() {
-  const session = {
+function sessionJson() {
+  return JSON.stringify({
     v: 1,
     kind: 'read-aloud-session',
     draft: draft.value,
     flags: [...flags.values()],
     settings: currentSettings(),
-  };
-  downloadText('read-aloud-session.json', JSON.stringify(session, null, 1) + '\n');
+  }, null, 1) + '\n';
+}
+
+function saveSession() {
+  void saveOrDownload('session', 'read-aloud-session.json',
+    new Blob([sessionJson()], {type: 'application/json'}), 'Session saved');
   cleanSnapshot = sessionFingerprint();
 }
+
+/* ------------------------ Autosave (opt-in) ----------------------- */
+// Off by default: on an untrusted computer the draft lives only in this
+// tab's memory. Turning it on writes a rolling session file to the drive
+// every minute and whenever reading stops, with a visible indicator so
+// it is always obvious which mode the machine is in.
+
+const AUTOSAVE_MS = window.__RA_AUTOSAVE_MS || 60000;
+let autosaveTimer = null;
+let autosaveWarned = false;
+
+async function autosaveNow() {
+  if (!autosaveToggle.checked || openedDirectly || !draft.value.trim()) return;
+  try {
+    await saveToDrive('session', 'autosave.raSession', new Blob([sessionJson()], {type: 'application/json'}));
+    autosaveWarned = false;
+  } catch (err) {
+    if (!autosaveWarned) {
+      autosaveWarned = true;
+      setStatus(statusDot.classList[1] || 'ready', statusTitle.textContent,
+        `Autosave could not write to the drive (${String(err.message || err)}).`);
+    }
+  }
+}
+
+function applyAutosaveState() {
+  autosaveDot.hidden = !autosaveToggle.checked;
+  if (autosaveTimer) { clearInterval(autosaveTimer); autosaveTimer = null; }
+  if (autosaveToggle.checked) {
+    autosaveTimer = setInterval(() => { void autosaveNow(); }, AUTOSAVE_MS);
+    void autosaveNow();
+  }
+}
+
+/* ------------------- Text out and file drop in -------------------- */
+
+function copyAllText() {
+  if (!draft.value.trim()) {
+    setStatus('ready', 'Nothing to copy', 'The draft is empty.');
+    return;
+  }
+  const words = draft.value.trim().split(/\s+/).length;
+  const done = () => setStatus('ready', 'Copied', `${words} word${words === 1 ? '' : 's'} copied to the clipboard.`);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(draft.value).then(done).catch(() => fallbackCopy(done));
+  } else {
+    fallbackCopy(done);
+  }
+}
+
+function fallbackCopy(done) {
+  const s = draft.selectionStart, e = draft.selectionEnd;
+  draft.focus();
+  draft.select();
+  try { document.execCommand('copy'); } catch (_) { /* nothing else to try */ }
+  draft.setSelectionRange(s, e);
+  done();
+}
+
+function saveDraftText() {
+  if (!draft.value.trim()) {
+    setStatus('ready', 'Nothing to save', 'The draft is empty.');
+    return;
+  }
+  void saveOrDownload('text', 'read-aloud-draft.txt', new Blob([draft.value], {type: 'text/plain'}), 'Draft saved');
+}
+
+// Dropped files are read straight into memory — no upload, no temp files.
+let pendingImport = null;
+
+function applyImport(text, name) {
+  stopAll({restarting: true});
+  draft.value = text;
+  flags.size && refreshFlags();
+  runLint();
+  updateStats();
+  syncIdleBackdrop();
+  updateButtons();
+  describeSelection();
+  refreshNarrationInfo();
+  setStatus('ready', `Opened ${name}`, 'The file was read into memory only; nothing was copied onto this computer.');
+}
+
+function offerImport(text, name) {
+  const dirty = draft.value.trim() && sessionFingerprint() !== cleanSnapshot;
+  if (!dirty) {
+    applyImport(text, name);
+    return;
+  }
+  pendingImport = {text, name};
+  importName.textContent = name;
+  importBanner.hidden = false;
+}
+
+function handleDroppedFile(file) {
+  if (!file) return;
+  const name = String(file.name || 'file');
+  if (!/\.(txt|md)$/i.test(name)) {
+    setStatus('ready', 'That file type cannot be opened', 'Drop a .txt or .md file onto the draft.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => offerImport(String(reader.result || ''), name);
+  reader.onerror = () => setStatus('error', 'Could not read the file', 'The dropped file could not be opened.');
+  reader.readAsText(file);
+}
+
+/* --------------------- Autosave restore offer --------------------- */
+// Never auto-load: an autosave from the drive is offered once, and the
+// person decides.
+
+function offerAutosaveRestore() {
+  if (openedDirectly || typeof fetch !== 'function') return;
+  fetch('/api/autosave', {cache: 'no-store'})
+    .then((r) => (r.ok ? r.text() : null))
+    .then((text) => {
+      if (!text) return;
+      let session = null;
+      try { session = JSON.parse(text); } catch (_) { return; }
+      if (!session || session.kind !== 'read-aloud-session') return;
+      pendingRestore = text;
+      restoreBanner.hidden = false;
+    })
+    .catch(() => { /* no autosave: perfectly fine */ });
+}
+
+let pendingRestore = null;
 
 function openSessionData(text) {
   let session;
@@ -1788,10 +1982,31 @@ settingsCopy.addEventListener('click', () => {
   } catch (_) { /* the selected text can still be copied manually */ }
 });
 settingsDownload.addEventListener('click', () => {
-  downloadText('settings.txt', settingsString() + '\n');
+  void saveOrDownload('text', 'settings.txt',
+    new Blob([settingsString() + '\n'], {type: 'text/plain'}), 'Settings saved');
 });
 sessionSave.addEventListener('click', saveSession);
 sessionOpen.addEventListener('click', () => sessionFile.click());
+copyAllButton.addEventListener('click', copyAllText);
+saveTxtButton.addEventListener('click', saveDraftText);
+autosaveToggle.addEventListener('input', applyAutosaveState);
+restoreYes.addEventListener('click', () => {
+  restoreBanner.hidden = true;
+  if (pendingRestore) openSessionData(pendingRestore);
+  pendingRestore = null;
+});
+restoreNo.addEventListener('click', () => { restoreBanner.hidden = true; pendingRestore = null; });
+importYes.addEventListener('click', () => {
+  importBanner.hidden = true;
+  if (pendingImport) applyImport(pendingImport.text, pendingImport.name);
+  pendingImport = null;
+});
+importNo.addEventListener('click', () => { importBanner.hidden = true; pendingImport = null; });
+draft.addEventListener('dragover', (e) => e.preventDefault());
+draft.addEventListener('drop', (e) => {
+  e.preventDefault();
+  handleDroppedFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+});
 sessionFile.addEventListener('change', () => {
   const file = sessionFile.files && sessionFile.files[0];
   if (!file) return;
@@ -1956,6 +2171,7 @@ refreshFlags();
 checkIntegrity();
 loadSettingsFile();
 loadVoiceCatalog();
+offerAutosaveRestore();
 cleanSnapshot = sessionFingerprint();
 
 if (openedDirectly) {

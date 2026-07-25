@@ -226,6 +226,20 @@ button.quiet { padding: 6px 9px; background: transparent; color: #5e6980; }
 .seg .segbtn.active { background: #7284ff; color: #0c1226; }
 .seg .segbtn:hover:not(:disabled) { transform: none; }
 
+.offer-banner {
+  margin: 8px 0 10px;
+  padding: 10px 14px;
+  border: 1px solid #c9d0e0;
+  border-radius: 12px;
+  background: rgba(114, 132, 255, 0.08);
+  font-size: 0.9rem;
+}
+.offer-banner button { margin-left: 8px; padding: 6px 12px; }
+:root[data-theme="dark"] .offer-banner { border-color: #303a53; background: rgba(114, 132, 255, 0.12); }
+
+.autosave-dot { color: #2f7d4f; font-size: 0.85rem; font-weight: 700; }
+:root[data-theme="dark"] .autosave-dot { color: #7fd79f; }
+
 /* The hidden attribute must always win, even over author display rules
    (flex/grid on the same element would otherwise override it). */
 [hidden] { display: none !important; }

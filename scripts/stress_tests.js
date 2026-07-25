@@ -38,7 +38,12 @@ function makeWorld() {
   w.ResizeObserver = class { observe() {} };
   w.URL.createObjectURL = (b) => { world.blobs.push(b); return 'blob:x'; };
   w.URL.revokeObjectURL = () => {};
-  w.fetch = (url) => {
+  w.fetch = (url, opts) => {
+    if (String(url) === '/api/save' && opts && opts.method === 'POST') {
+      world.saves = world.saves || [];
+      world.saves.push(JSON.parse(opts.body));
+      return Promise.resolve({ok: true, json: () => Promise.resolve({saved: 'saves/ok'})});
+    }
     if (String(url) === '/api/voices') {
       return Promise.resolve({ok: true, json: () => Promise.resolve({voices: [
         {id: 'amy-medium', name: 'Amy', quality: '', sampleRate: 22050,
@@ -131,9 +136,11 @@ function makeWorld() {
     check('500 flags toggled under 5s', flagMs < 5000, `${flagMs}ms`);
     check('500 flags counted', $('flagsInfo').textContent.includes('500 flagged'), $('flagsInfo').textContent);
     const t1 = Date.now();
-    world.blobs.length = 0;
+    world.saves = [];
     $('flagReportButton').click();
-    check('500-flag report generated quickly', Date.now() - t1 < 1000 && world.blobs.length === 1, `${Date.now() - t1}ms`);
+    const clickMs = Date.now() - t1;
+    for (let i = 0; i < 12 && !world.saves.length; i++) await new Promise((r) => setTimeout(r, 5));
+    check('500-flag report generated quickly', clickMs < 1000 && world.saves.length === 1 && world.saves[0].kind === 'report', `${clickMs}ms saves=${world.saves.length}`);
     draft.setSelectionRange(0, 0);
     const t2 = Date.now();
     key('F10');

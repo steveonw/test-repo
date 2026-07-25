@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -122,6 +123,66 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(map[string]any{"voices": valid, "invalid": invalid, "voicesDir": "voices"})
+	})
+
+	driveRoot := filepath.Dir(sharedDir)
+	mux.HandleFunc("/api/save", func(w http.ResponseWriter, r *http.Request) {
+		if !validHost(r.Host) {
+			http.Error(w, "invalid host", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		lastRequest.Store(time.Now().UnixNano())
+		r.Body = http.MaxBytesReader(w, r.Body, 256<<20)
+		var req struct {
+			Kind       string `json:"kind"`
+			Name       string `json:"name"`
+			DataBase64 string `json:"dataBase64"`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "the save request could not be read"})
+			return
+		}
+		data, err := base64.StdEncoding.DecodeString(req.DataBase64)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "the save data was not valid"})
+			return
+		}
+		rel, userErr, sysErr := writeSave(driveRoot, req.Kind, req.Name, data)
+		if userErr != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": userErr})
+			return
+		}
+		if sysErr != nil {
+			logger.Printf("save failed: %v", sysErr)
+			w.WriteHeader(http.StatusInsufficientStorage)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": friendlySaveError(sysErr)})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"saved": rel})
+	})
+
+	mux.HandleFunc("/api/autosave", func(w http.ResponseWriter, r *http.Request) {
+		if !validHost(r.Host) {
+			http.Error(w, "invalid host", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		b, ok := readAutosave(driveRoot)
+		if !ok {
+			http.Error(w, "no autosave", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(b)
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
