@@ -93,8 +93,7 @@ function makeWorld(preSeed) {
       return Promise.resolve({ok: true, json: () => Promise.resolve({saved: `saves/${req.kind}/${req.name}`})});
     }
     if (String(url) === '/api/autosave') {
-      if (world.autosaveFile) return Promise.resolve({ok: true, text: () => Promise.resolve(world.autosaveFile)});
-      return Promise.resolve({ok: false, status: 404, text: () => Promise.resolve('no autosave')});
+      return Promise.resolve({ok: true, text: () => Promise.resolve(world.autosaveFile || '{"none":true}')});
     }
     if (String(url) === '/health') {
       return Promise.resolve({ok: true, text: () => Promise.resolve(world.healthText || 'readaloud:abc\nintegrity:ok:9')});

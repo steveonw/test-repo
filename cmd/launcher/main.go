@@ -176,12 +176,15 @@ func main() {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
 		b, ok := readAutosave(driveRoot)
 		if !ok {
-			http.Error(w, "no autosave", http.StatusNotFound)
+			// A fresh drive has no autosave — that is the normal case, not an
+			// error. Answering 404 here would print a red line in every
+			// browser console on every clean boot.
+			_, _ = io.WriteString(w, `{"none":true}`)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(b)
 	})
 
