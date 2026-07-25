@@ -69,6 +69,13 @@
         Speaker
         <select id="speakerSelect"></select>
       </label>
+      <div class="speed-control" id="deliveryRow" hidden>
+        Delivery
+        <span class="seg" role="group" aria-label="Delivery style">
+          <button id="deliveryNatural" type="button" class="segbtn active">Natural</button>
+          <button id="deliverySteady" type="button" class="segbtn">Steady</button>
+        </span>
+      </div>
       <label class="speed-control" for="speed">
         Speed
         <input id="speed" type="range" min="0.65" max="1.45" step="0.05" value="1">
@@ -84,6 +91,11 @@
           Pause
           <input id="gap" type="range" min="0" max="1.5" step="0.05" value="0.35">
           <output id="gapValue" for="gap">0.35s</output>
+        </label>
+        <label for="pitch">
+          Pitch
+          <input id="pitch" type="range" min="0.85" max="1.15" step="0.01" value="1">
+          <output id="pitchValue" for="pitch">0%</output>
         </label>
         <label for="fontScale">
           Text size

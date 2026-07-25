@@ -62,7 +62,7 @@ function makeWorld(preSeed) {
       return g;
     }
     createBufferSource() {
-      const s = {onended: null, connect() {}, start() { world.liveSources.push(s); }, stop() { world.liveSources = world.liveSources.filter(x => x !== s); }};
+      const s = {onended: null, playbackRate: {value: 1}, connect() {}, start() { world.liveSources.push(s); }, stop() { world.liveSources = world.liveSources.filter(x => x !== s); }};
       return s;
     }
     get destination() { return {}; }
@@ -716,6 +716,103 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     key('F8');
     check('speakers: locked package always generates its pinned sid',
       world.workerInstance.received[0].sid === 3, JSON.stringify(world.workerInstance.received));
+  }
+
+  /* ============ pitch and delivery ============ */
+  {
+    const world = await makeWorld((wd) => {
+      wd.voiceCatalog = {voices: [
+        {id: 'amy-medium', name: 'Amy', quality: '', sampleRate: 22050, architecture: 'vits',
+         modelUrl: 'voices/amy-medium/model.onnx', tokensUrl: 'voices/amy-medium/tokens.txt'},
+        {id: 'kitten-multi', name: 'Kitten Multi', quality: 'nano', sampleRate: 24000,
+         architecture: 'kitten',
+         speakers: [{id: 0, name: 'Bella'}, {id: 1, name: 'Jasper'}],
+         modelUrl: 'voices/kitten-multi/model.onnx', tokensUrl: 'voices/kitten-multi/tokens.txt',
+         voicesUrl: 'voices/kitten-multi/voices.bin'},
+      ], invalid: []};
+    });
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: k}));
+    const sendResult = (n = 100) => world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-result', samples: new Float32Array(n).fill(0.9), sampleRate: 22050}});
+    const gen = () => world.workerInstance.received;
+
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    check('tuning: delivery toggle visible for a vits voice', $('deliveryRow').hidden === false);
+    check('tuning: natural is the default preset', $('deliveryNatural').classList.contains('active'));
+    check('tuning: vits init carries natural noise values',
+      world.lastInit.noiseScale === 0.667 && world.lastInit.noiseScaleW === 0.8, JSON.stringify(world.lastInit));
+
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    $('pitch').value = '1.10';
+    $('pitch').dispatchEvent(new w.Event('input', {bubbles: true}));
+    check('tuning: pitch label shows percent', $('pitchValue').value === '+10%', $('pitchValue').value);
+    const draft = $('draft');
+    draft.value = 'Solo sentence.';
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    check('tuning: engine speed compensates for pitch',
+      gen().length === 1 && Math.abs(gen()[0].speed - 1 / 1.10) < 0.001, JSON.stringify(gen()));
+    sendResult(); await tick(); await tick();
+    key('Escape');
+    $('pitch').value = '1.00';
+    $('pitch').dispatchEvent(new w.Event('input', {bubbles: true}));
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    check('tuning: pitch change invalidates like a speed change',
+      gen().length === 2 && Math.abs(gen()[1].speed - 1) < 0.001, JSON.stringify(gen()));
+    sendResult(); await tick(); await tick();
+    key('Escape');
+
+    // pitched export: 100-sample sentence at +15% must shrink to 87 samples
+    $('pitch').value = '1.15';
+    $('pitch').dispatchEvent(new w.Event('input', {bubbles: true}));
+    $('renderButton').click(); await tick();
+    sendResult(); await tick(); await tick();
+    $('exportButton').click(); await tick();
+    const buf = Buffer.from(await world.exportedBlob.arrayBuffer());
+    check('tuning: exported WAV is resampled by the pitch factor',
+      buf.length === 44 + Math.round(100 / 1.15) * 2, `bytes=${buf.length}`);
+    $('pitch').value = '1.00';
+    $('pitch').dispatchEvent(new w.Event('input', {bubbles: true}));
+
+    // delivery flip: engine restarts with steady values, no cache loss
+    draft.setSelectionRange(0, 0);
+    key('F8'); await tick();
+    check('tuning: natural playback cached', world.liveSources.length === 1);
+    key('Escape');
+    const workersBefore = world.ttsWorkers;
+    $('deliverySteady').click(); await tick();
+    check('tuning: steady flip restarts the engine with steady values',
+      world.ttsWorkers === workersBefore + 1 &&
+      world.lastInit.noiseScale === 0.25 && world.lastInit.noiseScaleW === 0.35, JSON.stringify(world.lastInit));
+    check('tuning: loading label names the preset', /\(Steady\)/.test($('statusTitle').textContent), $('statusTitle').textContent);
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    check('tuning: steady is a fresh cache lane', gen().length === 1, JSON.stringify(gen()));
+    sendResult(); await tick(); await tick();
+    key('Escape');
+    $('deliveryNatural').click(); await tick();
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    draft.setSelectionRange(0, 0);
+    key('F8'); await tick();
+    check('tuning: flipping back to natural replays instantly from cache',
+      gen().length === 0 && world.liveSources.length === 1, `requests=${gen().length} live=${world.liveSources.length}`);
+    key('Escape');
+
+    $('settingsBox').value = 'RA1 {"delivery":"steady","pitch":1.05}';
+    $('settingsApply').click(); await tick();
+    check('tuning: settings apply flips delivery and pitch',
+      world.lastInit.noiseScale === 0.25 && $('pitchValue').value === '+5%',
+      `${JSON.stringify(world.lastInit)} ${$('pitchValue').value}`);
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+
+    $('voiceSelect').value = 'kitten-multi';
+    $('voiceSelect').dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 8}});
+    check('tuning: kitten hides the delivery toggle', $('deliveryRow').hidden === true);
   }
 
   const passed = results.filter(r => r[0]).length;

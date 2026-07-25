@@ -30,7 +30,7 @@ function makeWorld() {
     createBuffer(c, len) { return {getChannelData: () => new Float32Array(len)}; }
     createGain() { return {gain: {value: 1}, connect() {}}; }
     createBufferSource() {
-      const s = {onended: null, connect() {}, start() { world.live.push(s); }, stop() { world.live = world.live.filter((x) => x !== s); }};
+      const s = {onended: null, playbackRate: {value: 1}, connect() {}, start() { world.live.push(s); }, stop() { world.live = world.live.filter((x) => x !== s); }};
       return s;
     }
     get destination() { return {}; }

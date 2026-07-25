@@ -45,6 +45,11 @@ const speakerRow = document.getElementById('speakerRow');
 const speakerSelect = document.getElementById('speakerSelect');
 const volume = document.getElementById('volume');
 const volumeValue = document.getElementById('volumeValue');
+const pitch = document.getElementById('pitch');
+const pitchValue = document.getElementById('pitchValue');
+const deliveryRow = document.getElementById('deliveryRow');
+const deliveryNatural = document.getElementById('deliveryNatural');
+const deliverySteady = document.getElementById('deliverySteady');
 const editorStack = document.querySelector('.editor-stack');
 
 let awaitingStep = false;
@@ -85,6 +90,46 @@ let currentSpeaker = 0;   // sid sent with every generate; multi-speaker package
 let deliveryPreset = 'natural'; // Phase 3 wires the Natural/Steady toggle to this
 let speakerChoice = {};   // voiceId -> remembered speaker, carried in the settings string
 
+// Delivery presets (Piper VITS only): "natural" is the engine's defaults;
+// "steady" flattens prosody for an even proofreading cadence. Kitten's
+// character lives in its speaker rows, so the toggle never applies there.
+const DELIVERY_PRESETS = {
+  natural: {noiseScale: 0.667, noiseScaleW: 0.8},
+  steady: {noiseScale: 0.25, noiseScaleW: 0.35},
+};
+
+// Pitch is applied after synthesis (playbackRate), so it works identically
+// for both families. The engine speed is compensated so the reading pace
+// always matches the Speed slider.
+function pitchFactor() {
+  const p = Number(pitch.value);
+  return Number.isFinite(p) ? Math.min(1.15, Math.max(0.85, p)) : 1;
+}
+
+function pitchLabel() {
+  const pct = Math.round((pitchFactor() - 1) * 100);
+  return (pct > 0 ? '+' : '') + pct + '%';
+}
+
+// Linear resample by the pitch factor: identical audio to playing the cached
+// samples at playbackRate=p, baked into exported files so the WAV/MP3 matches
+// what was heard. Gaps are wall-clock silence and are never resampled.
+function pitchResample(samples, p) {
+  if (Math.abs(p - 1) < 1e-6) return samples;
+  const outLen = Math.max(1, Math.round(samples.length / p));
+  const out = new Float32Array(outLen);
+  const step = outLen > 1 ? (samples.length - 1) / (outLen - 1) : 0;
+  for (let i = 0; i < outLen; i++) {
+    const x = i * step;
+    const i0 = Math.floor(x);
+    const frac = x - i0;
+    const a = samples[i0];
+    const b = samples[Math.min(samples.length - 1, i0 + 1)];
+    out[i] = a + (b - a) * frac;
+  }
+  return out;
+}
+
 // The speakers a voice offers: the package's named list when it declares one,
 // otherwise auto-named from the engine's reported speaker count.
 function speakerListFor(voice) {
@@ -117,6 +162,33 @@ function renderSpeakerSelect() {
 // Switching speakers never reloads the engine: the whole voices.bin is already
 // loaded, so the next generate call simply carries a different sid. The cache
 // keys include the speaker, so nothing is cleared and A/B replay is instant.
+function renderDeliveryToggle() {
+  const vits = currentVoice && currentVoice.architecture === 'vits';
+  deliveryRow.hidden = !vits;
+  deliveryNatural.classList.toggle('active', deliveryPreset === 'natural');
+  deliverySteady.classList.toggle('active', deliveryPreset === 'steady');
+}
+
+// Flipping delivery restarts the engine (the noise values are constructor
+// config), but never clears the cache: the preset is part of every sentence
+// key, so anything already rendered under both presets flips back instantly.
+function switchDelivery(preset) {
+  if (!DELIVERY_PRESETS[preset] || preset === deliveryPreset) return;
+  deliveryPreset = preset;
+  if (!currentVoice || currentVoice.architecture !== 'vits') {
+    renderDeliveryToggle();
+    return;
+  }
+  stopAll({restarting: true});
+  if (worker) worker.terminate();
+  requestQueue.length = 0;
+  runToken++;
+  startVoice(currentVoice);
+  renderDeliveryToggle();
+  refreshNarrationInfo();
+  describeSelection();
+}
+
 function switchSpeaker(id) {
   const n = Number(id);
   const list = speakerListFor(currentVoice);
@@ -175,21 +247,26 @@ function startVoice(voice) {
     currentSpeaker = speakerChoice[voice.id]; // clamped against numSpeakers on ready
   }
   renderSpeakerSelect();
+  renderDeliveryToggle();
   ready = false;
   armLoadWatchdog();
   worker = new Worker('sherpa-onnx-tts.worker.js', {type: 'module'});
   worker.onmessage = handleWorkerMessage;
   worker.onerror = handleWorkerError;
+  const preset = DELIVERY_PRESETS[deliveryPreset] || DELIVERY_PRESETS.natural;
   worker.postMessage({
     type: 'init',
     modelUrl: voice.modelUrl,
     tokensUrl: voice.tokensUrl,
     voicesUrl: voice.voicesUrl || '',
     arch: voice.architecture || 'vits',
-    speakerId: voice.speakerId || 0,
+    speakerId: currentSpeaker,
+    noiseScale: preset.noiseScale,
+    noiseScaleW: preset.noiseScaleW,
     voiceId: voice.id,
   });
-  setStatus('loading', `Loading ${voice.name}…`, 'Reading the offline voice from this drive.');
+  const steadyTag = voice.architecture === 'vits' && deliveryPreset === 'steady' ? ' (Steady)' : '';
+  setStatus('loading', `Loading ${voice.name}${steadyTag}…`, 'Reading the offline voice from this drive.');
   updateButtons();
 }
 
@@ -370,7 +447,10 @@ function applyPronunciation(spoken) {
 }
 
 function buildSegments(text, from, to) {
-  const spd = Number(speed.value);
+  // Engine speed divides by pitch so the audible pace, after the playbackRate
+  // shift, always equals the Speed slider. The key uses this engine speed, so
+  // pitch changes invalidate exactly like speed changes do.
+  const spd = Number(speed.value) / pitchFactor();
   return segmentText(text, from, to).map((s) => {
     const spoken = applyPronunciation(text.slice(s.start, s.end).replace(/\s+/g, ' ').trim());
     return {
@@ -586,6 +666,7 @@ async function playSegment() {
   buffer.getChannelData(0).set(audio.samples);
   const source = audioContext.createBufferSource();
   source.buffer = buffer;
+  source.playbackRate.value = pitchFactor();
   source.connect(gainNode);
   currentSource = source;
   const token = ++sourceToken;
@@ -1035,13 +1116,14 @@ function buildNarrationPcm() {
       totalSamples += gapLen;
     }
     const audio = sentenceCache.get(seg.key);
+    const rendered = pitchResample(audio.samples, pitchFactor());
     labels.push({
       t0: totalSamples / sampleRate,
-      t1: (totalSamples + audio.samples.length) / sampleRate,
+      t1: (totalSamples + rendered.length) / sampleRate,
       text: seg.text,
     });
-    parts.push(audio.samples);
-    totalSamples += audio.samples.length;
+    parts.push(rendered);
+    totalSamples += rendered.length;
   });
 
   const pcm = new Int16Array(totalSamples); // silence gaps stay zero
@@ -1452,6 +1534,8 @@ function currentSettings() {
     font: fontSelect.value,
     theme: themeSelect.value,
     volume: Number(volume.value),
+    pitch: Number(pitch.value),
+    delivery: deliveryPreset,
     step: stepToggle.checked,
     focus: focusToggle.checked,
     labels: labelsToggle.checked,
@@ -1504,9 +1588,14 @@ function applySettingsObject(obj) {
     compilePronunciationDict();
   }
   volume.value = String(clampNum(obj.volume, 0, 1, Number(volume.value)));
+  pitch.value = String(clampNum(obj.pitch, 0.85, 1.15, Number(pitch.value)));
+  if (obj.delivery === 'natural' || obj.delivery === 'steady') {
+    if (obj.delivery !== deliveryPreset) switchDelivery(obj.delivery);
+  }
   speedValue.value = `${Number(speed.value).toFixed(2)}×`;
   gapValue.value = `${Number(gap.value).toFixed(2)}s`;
   volumeValue.value = `${Math.round(Number(volume.value) * 100)}%`;
+  pitchValue.value = pitchLabel();
   if (gainNode) gainNode.gain.value = Number(volume.value);
   applyEditorMetrics();
   applyTheme();
@@ -1740,6 +1829,14 @@ volume.addEventListener('input', () => {
   volumeValue.value = `${Math.round(Number(volume.value) * 100)}%`;
   if (gainNode) gainNode.gain.value = Number(volume.value);
 });
+
+pitch.addEventListener('input', () => {
+  pitchValue.value = pitchLabel();
+  if (mode === 'idle') refreshNarrationInfo();
+});
+
+deliveryNatural.addEventListener('click', () => switchDelivery('natural'));
+deliverySteady.addEventListener('click', () => switchDelivery('steady'));
 
 speed.addEventListener('input', () => {
   speedValue.value = `${Number(speed.value).toFixed(2)}×`;

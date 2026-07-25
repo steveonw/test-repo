@@ -221,6 +221,11 @@ button.quiet { padding: 6px 9px; background: transparent; color: #5e6980; }
 .speed-control select { max-width: min(16em, 30vw); }
 .speed-control output { min-width: 3.5rem; color: #fff; font-variant-numeric: tabular-nums; }
 
+.seg { display: inline-flex; border: 1px solid #3a4664; border-radius: 10px; overflow: hidden; }
+.seg .segbtn { padding: 8px 12px; border-radius: 0; background: #232c47; color: #c7cfe4; font-weight: 650; }
+.seg .segbtn.active { background: #7284ff; color: #0c1226; }
+.seg .segbtn:hover:not(:disabled) { transform: none; }
+
 /* The hidden attribute must always win, even over author display rules
    (flex/grid on the same element would otherwise override it). */
 [hidden] { display: none !important; }
