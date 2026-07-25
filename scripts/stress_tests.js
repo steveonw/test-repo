@@ -28,6 +28,7 @@ function makeWorld() {
   w.AudioContext = class {
     async resume() {} async close() {}
     createBuffer(c, len) { return {getChannelData: () => new Float32Array(len)}; }
+    createGain() { return {gain: {value: 1}, connect() {}}; }
     createBufferSource() {
       const s = {onended: null, connect() {}, start() { world.live.push(s); }, stop() { world.live = world.live.filter((x) => x !== s); }};
       return s;

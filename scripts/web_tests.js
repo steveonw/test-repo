@@ -55,6 +55,12 @@ function makeWorld(preSeed) {
   class MockAudioContext {
     async resume() {} async close() {}
     createBuffer(c, len) { return {getChannelData: () => new Float32Array(len)}; }
+    createGain() {
+      const g = {gain: {value: 1}, connect() {}};
+      world.gainNodes = world.gainNodes || [];
+      world.gainNodes.push(g);
+      return g;
+    }
     createBufferSource() {
       const s = {onended: null, connect() {}, start() { world.liveSources.push(s); }, stop() { world.liveSources = world.liveSources.filter(x => x !== s); }};
       return s;
