@@ -181,6 +181,7 @@ textarea:focus {
 
 .controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-top: 18px;
@@ -217,6 +218,7 @@ button.quiet { padding: 6px 9px; background: transparent; color: #5e6980; }
 }
 
 .speed-control input { width: min(220px, 24vw); }
+.speed-control select { max-width: min(16em, 30vw); }
 .speed-control output { min-width: 3.5rem; color: #fff; font-variant-numeric: tabular-nums; }
 
 /* The hidden attribute must always win, even over author display rules
