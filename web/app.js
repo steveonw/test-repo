@@ -41,6 +41,8 @@ const sessionOpen = document.getElementById('sessionOpen');
 const sessionFile = document.getElementById('sessionFile');
 const quitButton = document.getElementById('quitButton');
 const voiceSelect = document.getElementById('voiceSelect');
+const speakerRow = document.getElementById('speakerRow');
+const speakerSelect = document.getElementById('speakerSelect');
 const volume = document.getElementById('volume');
 const volumeValue = document.getElementById('volumeValue');
 const editorStack = document.querySelector('.editor-stack');
@@ -81,6 +83,53 @@ let invalidVoices = [];
 let currentVoice = null;
 let currentSpeaker = 0;   // sid sent with every generate; multi-speaker packages change it live
 let deliveryPreset = 'natural'; // Phase 3 wires the Natural/Steady toggle to this
+let speakerChoice = {};   // voiceId -> remembered speaker, carried in the settings string
+
+// The speakers a voice offers: the package's named list when it declares one,
+// otherwise auto-named from the engine's reported speaker count.
+function speakerListFor(voice) {
+  if (!voice || voice.architecture !== 'kitten' || voice.lockedSpeaker) return [];
+  if (Array.isArray(voice.speakers) && voice.speakers.length) return voice.speakers;
+  const n = voice.numSpeakers || 0;
+  if (n < 2) return [];
+  return Array.from({length: n}, (_, i) => ({id: i, name: `Voice ${i + 1}`}));
+}
+
+function renderSpeakerSelect() {
+  const list = speakerListFor(currentVoice);
+  if (list.length < 2) {
+    speakerRow.hidden = true;
+    speakerSelect.textContent = '';
+    return;
+  }
+  speakerSelect.textContent = '';
+  for (const s of list) {
+    const opt = document.createElement('option');
+    opt.value = String(s.id);
+    opt.textContent = s.name;
+    speakerSelect.appendChild(opt);
+  }
+  if (!list.some((s) => s.id === currentSpeaker)) currentSpeaker = list[0].id;
+  speakerSelect.value = String(currentSpeaker);
+  speakerRow.hidden = false;
+}
+
+// Switching speakers never reloads the engine: the whole voices.bin is already
+// loaded, so the next generate call simply carries a different sid. The cache
+// keys include the speaker, so nothing is cleared and A/B replay is instant.
+function switchSpeaker(id) {
+  const n = Number(id);
+  const list = speakerListFor(currentVoice);
+  if (!list.some((s) => s.id === n) || n === currentSpeaker) return;
+  stopAll({restarting: true});
+  currentSpeaker = n;
+  speakerChoice[currentVoice.id] = n;
+  const name = (list.find((s) => s.id === n) || {}).name || `Voice ${n + 1}`;
+  setStatus('ready', `${voiceName()} — ${name}`, 'Press F8 to listen with this speaker. Rendered sentences per speaker stay cached.');
+  refreshNarrationInfo();
+  describeSelection();
+  updateButtons();
+}
 let preferredVoiceId = null;
 
 function voiceName() {
@@ -122,6 +171,10 @@ function clearLoadWatchdog() {
 function startVoice(voice) {
   currentVoice = voice;
   currentSpeaker = voice.speakerId || 0;
+  if (!voice.lockedSpeaker && Number.isInteger(speakerChoice[voice.id])) {
+    currentSpeaker = speakerChoice[voice.id]; // clamped against numSpeakers on ready
+  }
+  renderSpeakerSelect();
   ready = false;
   armLoadWatchdog();
   worker = new Worker('sherpa-onnx-tts.worker.js', {type: 'module'});
@@ -1403,6 +1456,7 @@ function currentSettings() {
     focus: focusToggle.checked,
     labels: labelsToggle.checked,
     voice: currentVoice ? currentVoice.id : (preferredVoiceId || undefined),
+    speaker: Object.keys(speakerChoice).length ? {...speakerChoice} : undefined,
     dict: Object.fromEntries(pronunciationDict),
   };
 }
@@ -1430,6 +1484,18 @@ function applySettingsObject(obj) {
   if (typeof obj.voice === 'string' && /^[a-z0-9-]{1,64}$/.test(obj.voice)) {
     preferredVoiceId = obj.voice;
     if (voiceCatalog.length && (!currentVoice || currentVoice.id !== obj.voice)) switchVoice(obj.voice);
+  }
+  if (obj.speaker && typeof obj.speaker === 'object' && !Array.isArray(obj.speaker)) {
+    speakerChoice = {};
+    for (const [k, v] of Object.entries(obj.speaker).slice(0, 50)) {
+      const n = Number(v);
+      if (/^[a-z0-9-]{1,64}$/.test(k) && Number.isInteger(n) && n >= 0 && n <= 255) speakerChoice[k] = n;
+    }
+    if (currentVoice && !currentVoice.lockedSpeaker && Number.isInteger(speakerChoice[currentVoice.id])) {
+      currentSpeaker = speakerChoice[currentVoice.id];
+      if (currentVoice.numSpeakers && currentSpeaker >= currentVoice.numSpeakers) currentSpeaker = 0;
+      renderSpeakerSelect();
+    }
   }
   if (obj.dict && typeof obj.dict === 'object' && !Array.isArray(obj.dict)) {
     pronunciationDict = Object.entries(obj.dict)
@@ -1552,6 +1618,12 @@ function handleWorkerMessage(event) {
     case 'sherpa-onnx-tts-ready':
       ready = true;
       clearLoadWatchdog();
+      if (currentVoice) {
+        currentVoice.numSpeakers = Math.max(1, Number(message.numSpeakers) || 1);
+        // Clamp a remembered or configured choice to what the model really has.
+        if (currentSpeaker >= currentVoice.numSpeakers) currentSpeaker = 0;
+      }
+      renderSpeakerSelect();
       setStatus('ready', `${voiceName()} is ready`, integrityProblem
         ? `Warning: ${integrityProblem} — the voice loaded, but re-copy the bundle if anything sounds wrong.`
         : 'Place the cursor and press F8, or render the whole draft below.');
@@ -1662,6 +1734,7 @@ clearButton.addEventListener('click', () => {
 });
 
 voiceSelect.addEventListener('input', () => switchVoice(voiceSelect.value));
+speakerSelect.addEventListener('input', () => switchSpeaker(speakerSelect.value));
 
 volume.addEventListener('input', () => {
   volumeValue.value = `${Math.round(Number(volume.value) * 100)}%`;

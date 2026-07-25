@@ -6,9 +6,10 @@ READ ALOUD USB
 3. macOS: double-click START - MACOS.app
 4. Linux: run START - LINUX.sh
 
-The first launch loads the Amy voice from the USB and can take several seconds.
-After the page says "Amy is ready," paste your draft, place the cursor where
-you want to start, and press F8. Amy reads continuously to the end, highlighting
+The first launch loads the default voice from the USB and can take several
+seconds. After the page says the voice is ready, paste your draft, place the
+cursor where you want to start, and press F8. Reading continues to the end,
+highlighting
 each sentence as it is spoken. Select text first to read only the selection.
 Press Esc to stop; F8 resumes from the stopped sentence.
 

@@ -9,40 +9,49 @@ import (
 	"strings"
 )
 
+// SpeakerEntry names one speaker row inside a multi-speaker (kitten) model.
+type SpeakerEntry struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
 // VoiceManifest is the strict per-package voice.json schema.
 type VoiceManifest struct {
-	SchemaVersion         int    `json:"schemaVersion"`
-	ID                    string `json:"id"`
-	Name                  string `json:"name"`
-	Language              string `json:"language"`
-	Locale                string `json:"locale"`
-	Engine                string `json:"engine"`
-	Architecture          string `json:"architecture"`
-	Model                 string `json:"model"`
-	Tokens                string `json:"tokens"`
-	Voices                string `json:"voices"`    // kitten only: style/speaker rows
-	SpeakerID             int    `json:"speakerId"` // kitten only: which of n speakers
-	Quality               string `json:"quality"`
-	Quantization          string `json:"quantization"`
-	SampleRate            int    `json:"sampleRate"`
-	MinimumRuntimeVersion string `json:"minimumRuntimeVersion"`
-	Default               bool   `json:"default"`
+	SchemaVersion         int            `json:"schemaVersion"`
+	ID                    string         `json:"id"`
+	Name                  string         `json:"name"`
+	Language              string         `json:"language"`
+	Locale                string         `json:"locale"`
+	Engine                string         `json:"engine"`
+	Architecture          string         `json:"architecture"`
+	Model                 string         `json:"model"`
+	Tokens                string         `json:"tokens"`
+	Voices                string         `json:"voices"`    // kitten only: style/speaker rows
+	SpeakerID             *int           `json:"speakerId"` // kitten only: lock package to one speaker (v1 style)
+	Speakers              []SpeakerEntry `json:"speakers"`  // kitten only, schema v2: name the speakers
+	Quality               string         `json:"quality"`
+	Quantization          string         `json:"quantization"`
+	SampleRate            int            `json:"sampleRate"`
+	MinimumRuntimeVersion string         `json:"minimumRuntimeVersion"`
+	Default               bool           `json:"default"`
 }
 
 // VoiceInfo is what the browser receives: validated metadata plus safe
 // same-origin URLs. Nothing from the manifest reaches the page unchecked.
 type VoiceInfo struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Locale       string `json:"locale"`
-	Quality      string `json:"quality"`
-	SampleRate   int    `json:"sampleRate"`
-	Architecture string `json:"architecture"`
-	ModelURL     string `json:"modelUrl"`
-	TokensURL    string `json:"tokensUrl"`
-	VoicesURL    string `json:"voicesUrl,omitempty"` // kitten only
-	SpeakerID    int    `json:"speakerId"`
-	Default      bool   `json:"default"`
+	ID            string         `json:"id"`
+	Name          string         `json:"name"`
+	Locale        string         `json:"locale"`
+	Quality       string         `json:"quality"`
+	SampleRate    int            `json:"sampleRate"`
+	Architecture  string         `json:"architecture"`
+	ModelURL      string         `json:"modelUrl"`
+	TokensURL     string         `json:"tokensUrl"`
+	VoicesURL     string         `json:"voicesUrl,omitempty"` // kitten only
+	SpeakerID     int            `json:"speakerId"`
+	LockedSpeaker bool           `json:"lockedSpeaker,omitempty"` // v1-style package pinned to one speaker
+	Speakers      []SpeakerEntry `json:"speakers,omitempty"`      // named speakers, when the package declares them
+	Default       bool           `json:"default"`
 }
 
 type InvalidVoice struct {
@@ -72,7 +81,7 @@ func validateVoiceDir(dir string) (*VoiceManifest, string) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, "voice.json is not valid JSON"
 	}
-	if m.SchemaVersion != 1 {
+	if m.SchemaVersion != 1 && m.SchemaVersion != 2 {
 		return nil, "unsupported schemaVersion"
 	}
 	if !voiceIDPattern.MatchString(m.ID) {
@@ -110,10 +119,37 @@ func validateVoiceDir(dir string) (*VoiceManifest, string) {
 		if !safeAssetName(m.Voices) {
 			return nil, "voices must be a plain filename inside the package"
 		}
-		if m.SpeakerID < 0 || m.SpeakerID > 255 {
+		if m.SpeakerID != nil && (*m.SpeakerID < 0 || *m.SpeakerID > 255) {
 			return nil, "speakerId out of range"
 		}
+		if m.Speakers != nil {
+			if m.SchemaVersion < 2 {
+				return nil, "speakers requires schemaVersion 2"
+			}
+			if m.SpeakerID != nil {
+				return nil, "use speakerId or speakers, not both"
+			}
+			if len(m.Speakers) == 0 || len(m.Speakers) > 256 {
+				return nil, "speakers must list between 1 and 256 entries"
+			}
+			seenSpk := map[int]bool{}
+			for _, s := range m.Speakers {
+				if s.ID < 0 || s.ID > 255 {
+					return nil, "speaker id out of range"
+				}
+				if seenSpk[s.ID] {
+					return nil, "duplicate speaker id"
+				}
+				seenSpk[s.ID] = true
+				name := strings.TrimSpace(s.Name)
+				if name == "" || len(name) > 64 {
+					return nil, "every speaker needs a name up to 64 characters"
+				}
+			}
+		}
 		required = append(required, m.Voices)
+	} else if m.Speakers != nil {
+		return nil, "speakers apply only to kitten packages"
 	}
 	for _, f := range required {
 		if st, err := os.Stat(filepath.Join(dir, f)); err != nil || st.IsDir() {
@@ -159,11 +195,17 @@ func scanVoices(voicesDir string) ([]VoiceInfo, []InvalidVoice) {
 			Architecture: m.Architecture,
 			ModelURL:     "voices/" + e.Name() + "/" + m.Model,
 			TokensURL:    "voices/" + e.Name() + "/" + m.Tokens,
-			SpeakerID:    m.SpeakerID,
 			Default:      m.Default,
 		}
 		if m.Architecture == "kitten" {
 			info.VoicesURL = "voices/" + e.Name() + "/" + m.Voices
+			if m.SpeakerID != nil {
+				info.SpeakerID = *m.SpeakerID
+				info.LockedSpeaker = true // v1-style package: one folder, one pinned speaker
+			}
+			if len(m.Speakers) > 0 {
+				info.Speakers = m.Speakers
+			}
 		}
 		valid = append(valid, info)
 	}

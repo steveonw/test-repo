@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	appName       = "ReadAloud Amy Medium"
-	editionID     = "amy-medium"
+	appName       = "Read Aloud Portable"
+	editionID     = "portable"
 	preferredAddr = "127.0.0.1:17391"
 	idleTimeout   = 30 * time.Minute
 )
@@ -463,7 +463,7 @@ func newLogger() (*log.Logger, func()) {
 	if err != nil {
 		dir = os.TempDir()
 	}
-	dir = filepath.Join(dir, "readaloud-portable-"+editionID)
+	dir = filepath.Join(dir, "readaloud-"+editionID)
 	_ = os.MkdirAll(dir, 0o700)
 	f, err := os.OpenFile(filepath.Join(dir, "launcher.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {

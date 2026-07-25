@@ -612,7 +612,7 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
         {id: 'amy-medium', name: 'Amy', quality: '', sampleRate: 22050, architecture: 'vits',
          modelUrl: 'voices/amy-medium/model.onnx', tokensUrl: 'voices/amy-medium/tokens.txt'},
         {id: 'kitten-micro', name: 'Kitten Micro', quality: 'micro', sampleRate: 24000,
-         architecture: 'kitten', speakerId: 3,
+         architecture: 'kitten', speakerId: 3, lockedSpeaker: true,
          modelUrl: 'voices/kitten-micro/model.onnx', tokensUrl: 'voices/kitten-micro/tokens.txt',
          voicesUrl: 'voices/kitten-micro/voices.bin'},
       ], invalid: []};
@@ -631,6 +631,91 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready'}});
     check('families: switching between families names the voice',
       $('statusTitle').textContent === 'Kitten Micro is ready', $('statusTitle').textContent);
+  }
+
+  /* ============ multi-speaker packages ============ */
+  {
+    const world = await makeWorld((wd) => {
+      wd.voiceCatalog = {voices: [
+        {id: 'amy-medium', name: 'Amy', quality: '', sampleRate: 22050, architecture: 'vits',
+         modelUrl: 'voices/amy-medium/model.onnx', tokensUrl: 'voices/amy-medium/tokens.txt'},
+        {id: 'kitten-multi', name: 'Kitten Multi', quality: 'nano', sampleRate: 24000,
+         architecture: 'kitten',
+         speakers: [{id: 0, name: 'Bella'}, {id: 1, name: 'Jasper'}, {id: 2, name: 'Nova'}],
+         modelUrl: 'voices/kitten-multi/model.onnx', tokensUrl: 'voices/kitten-multi/tokens.txt',
+         voicesUrl: 'voices/kitten-multi/voices.bin'},
+        {id: 'kitten-locked', name: 'Locked Kitten', quality: 'micro', sampleRate: 24000,
+         architecture: 'kitten', speakerId: 3, lockedSpeaker: true,
+         modelUrl: 'voices/kitten-locked/model.onnx', tokensUrl: 'voices/kitten-locked/tokens.txt',
+         voicesUrl: 'voices/kitten-locked/voices.bin'},
+      ], invalid: []};
+    });
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: k}));
+    const sendResult = () => world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-result', samples: new Float32Array(8), sampleRate: 24000}});
+    const gen = () => world.workerInstance.received;
+
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    check('speakers: single-speaker voice hides the picker', $('speakerRow').hidden === true);
+
+    $('voiceSelect').value = 'kitten-multi';
+    $('voiceSelect').dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    check('speakers: unlocked kitten inits at speaker 0', world.lastInit.speakerId === 0, JSON.stringify(world.lastInit));
+    const workersAfterLoad = world.ttsWorkers;
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 8}});
+    check('speakers: picker visible with the named speakers',
+      $('speakerRow').hidden === false && $('speakerSelect').options.length === 3 &&
+      $('speakerSelect').options[0].textContent === 'Bella', $('speakerSelect').innerHTML);
+
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    const draft = $('draft');
+    draft.value = 'Solo sentence.';
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    check('speakers: first read carries sid 0', gen().length === 1 && gen()[0].sid === 0, JSON.stringify(gen()));
+    sendResult(); await tick(); await tick();
+    key('Escape');
+
+    $('speakerSelect').value = '1';
+    $('speakerSelect').dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    check('speakers: switching speakers reloads nothing',
+      world.ttsWorkers === workersAfterLoad && world.workerInstance.terminated === false, `workers=${world.ttsWorkers}`);
+    check('speakers: status names the chosen speaker', /Jasper/.test($('statusTitle').textContent), $('statusTitle').textContent);
+
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    check('speakers: new speaker misses the old cache and generates with sid 1',
+      gen().length === 2 && gen()[1].sid === 1, JSON.stringify(gen()));
+    sendResult(); await tick(); await tick();
+    key('Escape');
+
+    $('speakerSelect').value = '0';
+    $('speakerSelect').dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    draft.setSelectionRange(0, 0);
+    key('F8'); await tick();
+    check('speakers: switching back replays from cache with zero new requests',
+      gen().length === 2 && world.liveSources.length === 1, `requests=${gen().length} live=${world.liveSources.length}`);
+    key('Escape');
+
+    $('settingsBox').value = 'RA1 {"speaker":{"kitten-multi":2}}';
+    $('settingsApply').click(); await tick();
+    check('speakers: settings apply selects the remembered speaker', $('speakerSelect').value === '2', $('speakerSelect').value);
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    check('speakers: reads with the speaker from settings', gen()[gen().length - 1].sid === 2, JSON.stringify(gen()));
+    key('Escape');
+
+    $('voiceSelect').value = 'kitten-locked';
+    $('voiceSelect').dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    check('speakers: locked package inits with its pinned speaker', world.lastInit.speakerId === 3, JSON.stringify(world.lastInit));
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 8}});
+    check('speakers: locked package hides the picker even with many speakers', $('speakerRow').hidden === true);
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    check('speakers: locked package always generates its pinned sid',
+      world.workerInstance.received[0].sid === 3, JSON.stringify(world.workerInstance.received));
   }
 
   const passed = results.filter(r => r[0]).length;

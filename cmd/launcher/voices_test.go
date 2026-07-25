@@ -39,19 +39,31 @@ func TestScanVoices(t *testing.T) {
 	writeVoice(t, root, "kitten-traversal", `{"schemaVersion":1,"id":"ktr","name":"K","engine":"sherpa-kitten","architecture":"kitten","model":"model.onnx","tokens":"tokens.txt","voices":"../../secret.bin","quantization":"none"}`, "model.onnx", "tokens.txt")
 	writeVoice(t, root, "mismatch", `{"schemaVersion":1,"id":"mm","name":"M","engine":"sherpa-kitten","architecture":"vits","model":"model.onnx","tokens":"tokens.txt","quantization":"none"}`, "model.onnx", "tokens.txt")
 	writeVoice(t, root, "bad-speaker", `{"schemaVersion":1,"id":"bs","name":"B","engine":"sherpa-kitten","architecture":"kitten","model":"model.onnx","tokens":"tokens.txt","voices":"voices.bin","quantization":"none","speakerId":900}`, "model.onnx", "tokens.txt", "voices.bin")
-	writeVoice(t, root, "old-schema", `{"schemaVersion":2,"id":"v2","name":"V2","engine":"sherpa-vits","architecture":"vits","model":"model.onnx","tokens":"tokens.txt","quantization":"none"}`, "model.onnx", "tokens.txt")
+	writeVoice(t, root, "old-schema", `{"schemaVersion":3,"id":"v3","name":"V3","engine":"sherpa-vits","architecture":"vits","model":"model.onnx","tokens":"tokens.txt","quantization":"none"}`, "model.onnx", "tokens.txt")
+	// schema v2 multi-speaker kitten: valid, and the ways it can be wrong
+	writeVoice(t, root, "kitten-multi", `{"schemaVersion":2,"id":"kitten-multi","name":"Kitten Multi","engine":"sherpa-kitten","architecture":"kitten","model":"model.onnx","tokens":"tokens.txt","voices":"voices.bin","quantization":"none","speakers":[{"id":0,"name":"Bella"},{"id":1,"name":"Jasper"}]}`, "model.onnx", "tokens.txt", "voices.bin")
+	writeVoice(t, root, "spk-conflict", `{"schemaVersion":2,"id":"kc","name":"K","engine":"sherpa-kitten","architecture":"kitten","model":"model.onnx","tokens":"tokens.txt","voices":"voices.bin","quantization":"none","speakerId":1,"speakers":[{"id":0,"name":"A"}]}`, "model.onnx", "tokens.txt", "voices.bin")
+	writeVoice(t, root, "spk-on-v1", `{"schemaVersion":1,"id":"kv1","name":"K","engine":"sherpa-kitten","architecture":"kitten","model":"model.onnx","tokens":"tokens.txt","voices":"voices.bin","quantization":"none","speakers":[{"id":0,"name":"A"}]}`, "model.onnx", "tokens.txt", "voices.bin")
+	writeVoice(t, root, "spk-dup", `{"schemaVersion":2,"id":"kd","name":"K","engine":"sherpa-kitten","architecture":"kitten","model":"model.onnx","tokens":"tokens.txt","voices":"voices.bin","quantization":"none","speakers":[{"id":2,"name":"A"},{"id":2,"name":"B"}]}`, "model.onnx", "tokens.txt", "voices.bin")
+	writeVoice(t, root, "spk-range", `{"schemaVersion":2,"id":"kr","name":"K","engine":"sherpa-kitten","architecture":"kitten","model":"model.onnx","tokens":"tokens.txt","voices":"voices.bin","quantization":"none","speakers":[{"id":900,"name":"A"}]}`, "model.onnx", "tokens.txt", "voices.bin")
+	writeVoice(t, root, "spk-noname", `{"schemaVersion":2,"id":"kn","name":"K","engine":"sherpa-kitten","architecture":"kitten","model":"model.onnx","tokens":"tokens.txt","voices":"voices.bin","quantization":"none","speakers":[{"id":0,"name":"  "}]}`, "model.onnx", "tokens.txt", "voices.bin")
+	writeVoice(t, root, "spk-on-vits", `{"schemaVersion":2,"id":"kv","name":"K","engine":"sherpa-vits","architecture":"vits","model":"model.onnx","tokens":"tokens.txt","quantization":"none","speakers":[{"id":0,"name":"A"}]}`, "model.onnx", "tokens.txt")
 
 	valid, invalid := scanVoices(root)
-	if len(valid) != 3 {
-		t.Fatalf("want 3 valid voices, got %d: %+v", len(valid), valid)
+	if len(valid) != 4 {
+		t.Fatalf("want 4 valid voices, got %d: %+v", len(valid), valid)
 	}
-	// sorted by display name: Amy Medium, Kitten Micro, Lessac High
-	if valid[0].Name != "Amy Medium" || valid[1].Name != "Kitten Micro" || valid[2].Name != "Lessac High" {
+	// sorted by display name: Amy Medium, Kitten Micro, Kitten Multi, Lessac High
+	if valid[0].Name != "Amy Medium" || valid[1].Name != "Kitten Micro" || valid[2].Name != "Kitten Multi" || valid[3].Name != "Lessac High" {
 		t.Fatalf("wrong ordering: %+v", valid)
 	}
 	k := valid[1]
-	if k.Architecture != "kitten" || k.VoicesURL != "voices/kitten-good/voices.bin" || k.SpeakerID != 3 {
+	if k.Architecture != "kitten" || k.VoicesURL != "voices/kitten-good/voices.bin" || k.SpeakerID != 3 || !k.LockedSpeaker {
 		t.Fatalf("kitten fields wrong: %+v", k)
+	}
+	km := valid[2]
+	if km.LockedSpeaker || len(km.Speakers) != 2 || km.Speakers[0].Name != "Bella" || km.Speakers[1].ID != 1 {
+		t.Fatalf("multi-speaker fields wrong: %+v", km)
 	}
 	if valid[0].VoicesURL != "" {
 		t.Fatalf("vits voice must not carry a voices url: %+v", valid[0])
@@ -68,6 +80,8 @@ func TestScanVoices(t *testing.T) {
 		"wrong-arch": "architecture", "quantized": "quantized", "dup": "duplicate", "old-schema": "schemaVersion",
 		"kitten-no-voices": "voices file", "kitten-missing-bin": "missing file", "kitten-traversal": "plain filename",
 		"mismatch": "do not match", "bad-speaker": "speakerId",
+		"spk-conflict": "not both", "spk-on-v1": "schemaVersion 2", "spk-dup": "duplicate speaker",
+		"spk-range": "out of range", "spk-noname": "name", "spk-on-vits": "kitten",
 	} {
 		if r, ok := reasons[dir]; !ok || !contains(r, want) {
 			t.Errorf("%s: want reason containing %q, got %q", dir, want, r)

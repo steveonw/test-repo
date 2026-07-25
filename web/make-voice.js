@@ -83,8 +83,11 @@ function buildManifest(id, name, config, opts = {}) {
     minimumRuntimeVersion: '1',
   };
   if (kitten) {
+    // Schema v2: the package carries every speaker in voices.bin and the app
+    // offers them all; nobody has to pick one at build time. (VITS stays at
+    // schema 1 so those packages keep working on older drives.)
+    base.schemaVersion = 2;
     base.voices = 'voices.bin';
-    base.speakerId = Number(opts.speakerId !== undefined ? opts.speakerId : ($('speakerId') ? $('speakerId').value : 0)) || 0;
   }
   return base;
 }
@@ -114,7 +117,7 @@ function validateAll() {
     fam.className = 'family ' + (kitten ? 'kitten' : (sniffedKitten ? 'warnfam' : 'vits'));
   }
   const spk = $('speakerRow');
-  if (spk) spk.hidden = !kitten;
+  if (spk) spk.hidden = true; // shown by the test bench once the engine reports the speaker count
   $('checks').innerHTML = checks.map(([label, ok, soft]) =>
     `<li class="${ok ? 'ok' : (soft ? 'soft' : 'bad')}">${ok ? '✓' : (soft ? '•' : '✗')} ${label}${(!ok && soft) ? ' — defaults will be used' : ''}</li>`).join('');
   const hardOk = checks.filter((c) => !c[2]).every((c) => c[1]);
@@ -183,16 +186,38 @@ $('downloadBtn').addEventListener('click', () => {
 /* --------------------------- test bench ---------------------------- */
 let testWorker = null;
 let audioCtx = null;
+let testReady = false;
+function speakTest() {
+  const sid = $('auditionSpeaker') ? Number($('auditionSpeaker').value) || 0 : 0;
+  testWorker.postMessage({type: 'generate', text: $('testText').value || 'This is a test of the new voice.', sid, speed: 1});
+}
 $('testBtn').addEventListener('click', () => {
   if (testWorker) testWorker.terminate();
+  testReady = false;
   $('status').textContent = 'Loading the engine with this voice…';
   testWorker = new Worker('sherpa-onnx-tts.worker.js', {type: 'module'});
   testWorker.onmessage = (e) => {
     const m = e.data || {};
     if (m.type === 'sherpa-onnx-tts-progress') $('status').textContent = `Loading… ${String(m.status || '').slice(0, 60)}`;
     else if (m.type === 'sherpa-onnx-tts-ready') {
-      $('status').textContent = 'Voice loaded — speaking the test sentence…';
-      testWorker.postMessage({type: 'generate', text: $('testText').value || 'This is a test of the new voice.', speed: 1});
+      testReady = true;
+      const n = Math.max(1, Number(m.numSpeakers) || 1);
+      const row = $('speakerRow');
+      const sel = $('auditionSpeaker');
+      if (row && sel) {
+        sel.textContent = '';
+        for (let i = 0; i < n; i++) {
+          const opt = document.createElement('option');
+          opt.value = String(i);
+          opt.textContent = `Voice ${i + 1}`;
+          sel.appendChild(opt);
+        }
+        row.hidden = n < 2;
+      }
+      $('status').textContent = n > 1
+        ? `Voice loaded — ${n} speakers in this package. Speaking the test sentence…`
+        : 'Voice loaded — speaking the test sentence…';
+      speakTest();
     } else if (m.type === 'sherpa-onnx-tts-result') {
       audioCtx = audioCtx || new AudioContext();
       const buf = audioCtx.createBuffer(1, m.samples.length, m.sampleRate);
@@ -209,12 +234,14 @@ $('testBtn').addEventListener('click', () => {
   testWorker.postMessage({
     type: 'init',
     arch: isKitten() ? 'kitten' : 'vits',
-    speakerId: $('speakerId') ? Number($('speakerId').value) || 0 : 0,
     modelData: modelBuf.slice(0),
     tokensData: tokensBuf.slice(0),
     voicesData: voicesBuf ? voicesBuf.slice(0) : null,
   });
 });
+if ($('auditionSpeaker')) {
+  $('auditionSpeaker').addEventListener('input', () => { if (testWorker && testReady) speakTest(); });
+}
 
 if (!window.crossOriginIsolated) {
   $('benchNote').textContent = 'Testing is available when this page is opened through the Read Aloud launcher (start the app, then open make-voice.html at the same address). Package building works everywhere.';
