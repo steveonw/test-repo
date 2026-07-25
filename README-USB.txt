@@ -11,7 +11,9 @@ seconds. After the page says the voice is ready, paste your draft, place the
 cursor where you want to start, and press F8. Reading continues to the end,
 highlighting
 each sentence as it is spoken. Select text first to read only the selection.
-Press Esc to stop; F8 resumes from the stopped sentence.
+Press Esc to stop; a resume marker stays on that sentence (it survives edits
+and is saved in sessions), and F8 resumes from there. Press ? in the app for
+a keyboard shortcut overlay.
 
 To make an audio file, press "Render / Update," wait for every sentence to
 finish, then press "Export WAV." If you edit the draft afterward, pressing

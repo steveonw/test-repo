@@ -52,6 +52,7 @@
       </div>
       <div class="selection-row">
         <span id="selectionInfo">F8 reads aloud from the cursor to the end. Esc stops.</span>
+        <button id="tidyButton" class="quiet" type="button" title="Straighten quotes, remove hidden characters">Tidy text</button>
         <button id="clearButton" class="quiet" type="button">Clear</button>
       </div>
       <div class="lint-row" id="lintInfo" aria-live="polite"></div>
@@ -91,56 +92,69 @@
         <input id="speed" type="range" min="0.65" max="1.45" step="0.05" value="1">
         <output id="speedValue" for="speed">1.00×</output>
       </label>
-      <label class="speed-control" for="volume">
-        Volume
-        <input id="volume" type="range" min="0" max="1" step="0.05" value="1">
-        <output id="volumeValue" for="volume">100%</output>
-      </label>
-      <div class="tuning-row" aria-label="Pacing and display">
-        <label for="gap">
-          Pause
-          <input id="gap" type="range" min="0" max="1.5" step="0.05" value="0.35">
-          <output id="gapValue" for="gap">0.35s</output>
-        </label>
-        <label for="pitch">
-          Pitch
-          <input id="pitch" type="range" min="0.85" max="1.15" step="0.01" value="1">
-          <output id="pitchValue" for="pitch">0%</output>
-        </label>
-        <label for="fontScale">
-          Text size
-          <input id="fontScale" type="range" min="0.8" max="1.6" step="0.05" value="1">
-          <output id="fontValue" for="fontScale">100%</output>
-        </label>
-        <label for="lineSpacing">
-          Spacing
-          <input id="lineSpacing" type="range" min="1.3" max="2.4" step="0.05" value="1.7">
-          <output id="spacingValue" for="lineSpacing">1.70</output>
-        </label>
-        <label for="fontSelect">
-          Font
-          <select id="fontSelect">
-            <option value="serif" selected>Serif</option>
-            <option value="hyper">Hyperlegible</option>
-          </select>
-        </label>
-        <label for="themeSelect">
-          Theme
-          <select id="themeSelect">
-            <option value="auto" selected>Auto</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </label>
-        <label class="toggle" for="stepToggle">
-          <input id="stepToggle" type="checkbox">
-          Step
-        </label>
-        <label class="toggle" for="focusToggle">
-          <input id="focusToggle" type="checkbox">
-          Focus
-        </label>
-      </div>
+      <button id="helpButton" class="quiet help-btn" type="button" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+      <details class="ctl-group" id="playbackGroup" open>
+        <summary>Playback</summary>
+        <div class="tuning-row" aria-label="Playback tuning">
+          <label for="volume">
+            Volume
+            <input id="volume" type="range" min="0" max="1" step="0.05" value="1">
+            <output id="volumeValue" for="volume">100%</output>
+          </label>
+          <label for="gap">
+            Pause
+            <input id="gap" type="range" min="0" max="1.5" step="0.05" value="0.35">
+            <output id="gapValue" for="gap">0.35s</output>
+          </label>
+          <label for="pitch">
+            Pitch
+            <input id="pitch" type="range" min="0.85" max="1.15" step="0.01" value="1">
+            <output id="pitchValue" for="pitch">0%</output>
+          </label>
+          <label class="toggle" for="stepToggle">
+            <input id="stepToggle" type="checkbox">
+            Step
+          </label>
+          <label class="toggle" for="focusToggle">
+            <input id="focusToggle" type="checkbox">
+            Focus
+          </label>
+        </div>
+      </details>
+      <details class="ctl-group" id="displayGroup" open>
+        <summary>Display</summary>
+        <div class="tuning-row" aria-label="Display settings">
+          <label for="fontScale">
+            Text size
+            <input id="fontScale" type="range" min="0.8" max="1.6" step="0.05" value="1">
+            <output id="fontValue" for="fontScale">100%</output>
+          </label>
+          <label for="lineSpacing">
+            Spacing
+            <input id="lineSpacing" type="range" min="1.3" max="2.4" step="0.05" value="1.7">
+            <output id="spacingValue" for="lineSpacing">1.70</output>
+          </label>
+          <label for="fontSelect">
+            Font
+            <select id="fontSelect">
+              <option value="serif" selected>Serif</option>
+              <option value="hyper">Hyperlegible</option>
+            </select>
+          </label>
+          <label for="themeSelect">
+            Theme
+            <select id="themeSelect">
+              <option value="auto" selected>Auto</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label class="toggle" for="cleanPasteToggle">
+            <input id="cleanPasteToggle" type="checkbox" checked>
+            Clean pasted text
+          </label>
+        </div>
+      </details>
     </section>
 
     <section class="narration" aria-label="Narration and WAV export">
@@ -163,6 +177,8 @@
           <input id="labelsToggle" type="checkbox">
           Audacity labels
         </label>
+        <button id="copyAllButton" class="quiet" type="button">Copy all text</button>
+        <button id="saveTxtButton" class="quiet" type="button">Save draft as .txt</button>
       </div>
     </section>
 
@@ -182,8 +198,6 @@
           <button id="settingsDownload" class="quiet" type="button">Save settings.txt to drive</button>
           <button id="sessionSave" class="quiet" type="button">Save session to drive</button>
           <button id="sessionOpen" class="quiet" type="button">Open session</button>
-          <button id="copyAllButton" class="quiet" type="button">Copy all text</button>
-          <button id="saveTxtButton" class="quiet" type="button">Save draft as .txt</button>
           <label class="toggle" for="autosaveToggle">
             <input id="autosaveToggle" type="checkbox">
             Autosave to drive
@@ -202,7 +216,7 @@
 
     <details class="help">
       <summary>Keyboard and troubleshooting</summary>
-      <p><kbd>F8</kbd> reads aloud from the cursor to the end of the draft, highlighting each sentence as it is spoken. The next sentence is prepared while the current one plays, so reading is continuous. With text selected, <kbd>F8</kbd> reads only the selection. <kbd>Esc</kbd> stops, and pressing <kbd>F8</kbd> again resumes from the stopped sentence. Editing the text stops playback.</p>
+      <p><kbd>F8</kbd> reads aloud from the cursor to the end of the draft, highlighting each sentence as it is spoken. The next sentence is prepared while the current one plays, so reading is continuous. With text selected, <kbd>F8</kbd> reads only the selection. <kbd>Esc</kbd> stops and leaves a <strong>▸ resume marker</strong> on the sentence — it follows the sentence through edits and clears itself once you read it again. Pressing <kbd>F8</kbd> resumes from the stopped sentence. Editing the text stops playback. Press <kbd>?</kbd> anytime for the shortcut overlay.</p>
       <p><strong>Adding voices:</strong> copy a compatible voice package folder into the
       <strong>voices</strong> folder next to <strong>shared</strong> on this drive, then relaunch.
       Two families work: <strong>Piper VITS</strong> packages hold <code>voice.json</code>,
@@ -220,6 +234,21 @@
       <p><strong>Render / Update</strong> synthesizes every sentence of the draft into memory, and <strong>Export WAV</strong> stitches them into one audio file with natural pauses. After editing, Render / Update re-records only the sentences that changed; everything else is reused instantly. Changing the speed re-renders everything, since it produces different audio.</p>
       <p>Do not open <code>shared/index.html</code> directly. Close this page and use the matching <code>START</code> launcher in the parent folder. Keep the <code>shared</code> folder beside the launcher.</p>
     </details>
+    <div id="helpOverlay" class="help-overlay" hidden role="dialog" aria-label="Keyboard shortcuts">
+      <div class="help-card">
+        <strong>Keyboard shortcuts</strong>
+        <dl>
+          <dt><kbd>F8</kbd></dt><dd>Read from the cursor (or read the selection). In step mode: next sentence.</dd>
+          <dt><kbd>F7</kbd></dt><dd>Replay the current sentence.</dd>
+          <dt><kbd>F9</kbd></dt><dd>Flag the current sentence while listening.</dd>
+          <dt><kbd>F10</kbd></dt><dd>Jump to the next flagged sentence.</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Stop reading (a ▸ resume marker is left on the sentence).</dd>
+          <dt><kbd>Space</kbd></dt><dd>Next sentence in step mode, when the text box is not focused.</dd>
+          <dt><kbd>?</kbd></dt><dd>Show or hide this overlay.</dd>
+        </dl>
+        <button id="helpClose" class="quiet" type="button">Close</button>
+      </div>
+    </div>
   </main>
 
   <script src="app.js" defer></script>

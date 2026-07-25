@@ -240,6 +240,64 @@ button.quiet { padding: 6px 9px; background: transparent; color: #5e6980; }
 .autosave-dot { color: #2f7d4f; font-size: 0.85rem; font-weight: 700; }
 :root[data-theme="dark"] .autosave-dot { color: #7fd79f; }
 
+/* Collapsible groups inside the dark controls card */
+.ctl-group { width: 100%; }
+.ctl-group summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8b98bd;
+  padding: 6px 0 2px;
+  border-top: 1px solid rgba(122, 136, 169, 0.18);
+  user-select: none;
+}
+.ctl-group summary::before { content: '▸ '; }
+.ctl-group[open] summary::before { content: '▾ '; }
+.ctl-group .tuning-row { border-top: none; margin-top: 4px; padding-top: 0; }
+.help-btn { margin-left: auto; font-weight: 800; border: 1px solid #3a4664; border-radius: 50%; width: 34px; height: 34px; padding: 0; color: #c7cfe4; }
+
+/* Keyboard shortcut overlay */
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 18, 38, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+.help-card {
+  background: #fff;
+  color: #1c2438;
+  border-radius: 16px;
+  padding: 22px 26px;
+  max-width: 520px;
+  width: min(92vw, 520px);
+  box-shadow: 0 24px 60px rgba(12, 18, 38, 0.35);
+}
+.help-card dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 14px 0; }
+.help-card dd { margin: 0; font-size: 0.92rem; }
+:root[data-theme="dark"] .help-card { background: #1d2538; color: #dce1f1; }
+
+/* Resume marker: one solid accent underline, distinct from dotted flags */
+u.resumemark {
+  text-decoration: underline;
+  text-decoration-style: solid;
+  text-decoration-color: #7284ff;
+  text-decoration-thickness: 2.5px;
+  text-underline-offset: 3px;
+}
+
+/* Sentences just re-recorded by Render / Update */
+u.fresh { text-decoration: none; background: rgba(114, 132, 255, 0.16); border-radius: 3px; }
+
+/* Pinned resume row in the flag panel */
+.flag-panel li.flag-resume { border-left: 3px solid #7284ff; }
+.flag-panel li.flag-resume .flag-text::before { content: '▸ Resume — '; font-weight: 750; color: #5a6cf0; }
+
 /* The hidden attribute must always win, even over author display rules
    (flex/grid on the same element would otherwise override it). */
 [hidden] { display: none !important; }

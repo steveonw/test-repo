@@ -61,6 +61,13 @@ const importBanner = document.getElementById('importBanner');
 const importName = document.getElementById('importName');
 const importYes = document.getElementById('importYes');
 const importNo = document.getElementById('importNo');
+const helpButton = document.getElementById('helpButton');
+const helpOverlay = document.getElementById('helpOverlay');
+const helpClose = document.getElementById('helpClose');
+const tidyButton = document.getElementById('tidyButton');
+const cleanPasteToggle = document.getElementById('cleanPasteToggle');
+const playbackGroup = document.getElementById('playbackGroup');
+const displayGroup = document.getElementById('displayGroup');
 const editorStack = document.querySelector('.editor-stack');
 
 let awaitingStep = false;
@@ -608,6 +615,8 @@ function handleResult(message) {
       void playSegment();
     }
   } else if (mode === 'rendering' && req.token === runToken) {
+    const doneSeg = segments[req.index];
+    if (doneSeg) freshTint.push({s: doneSeg.start, e: doneSeg.end});
     showRenderProgress();
   }
   pumpGenerator();
@@ -662,6 +671,7 @@ async function playSegment() {
   const seg = segments[playPos];
   const audio = sentenceCache.get(seg.key);
   if (!audio) return;
+  clearResumeIfReached(seg);
   renderHighlight(seg);
 
   audioContext ??= new AudioContext();
@@ -882,6 +892,37 @@ function resolveFlags() {
   return resolved;
 }
 
+// ---- Resume marker (spec 4.7): a reserved bookmark riding the flag anchors.
+// Placed when reading stops, it survives edits like any flag, serializes into
+// sessions for free, and clears itself once its sentence is read again.
+function resumeFlagId() {
+  for (const [id, flag] of flags) if (flag.kind === 'resume') return id;
+  return null;
+}
+
+function userFlagCount() {
+  return flags.size - (resumeFlagId() !== null ? 1 : 0);
+}
+
+function setResumeFlag(seg) {
+  const old = resumeFlagId();
+  if (old !== null) flags.delete(old);
+  flags.set(++flagIdCounter, {...captureFlag(draft.value, seg), kind: 'resume'});
+  refreshFlags();
+}
+
+// Reading the marked sentence again (from it, or straight past it) retires
+// the marker.
+function clearResumeIfReached(seg) {
+  const id = resumeFlagId();
+  if (id === null || !seg) return;
+  const r = resolveFlags().find((x) => x.id === id);
+  if (r && r.seg && r.seg.start < seg.end && r.seg.end > seg.start) {
+    flags.delete(id);
+    refreshFlags();
+  }
+}
+
 function toggleFlag() {
   const seg = currentFlagTarget();
   if (!seg) return;
@@ -890,11 +931,13 @@ function toggleFlag() {
   // Full document resolution is reserved for the panel, F10, and reports.
   let coveringId = null;
   for (const [id, flag] of flags) {
+    if (flag.kind === 'resume') continue;
     if (flag.text === raw) { coveringId = id; break; }
   }
   if (coveringId === null) {
     let bestScore = 0;
     for (const [id, flag] of flags) {
+      if (flag.kind === 'resume') continue;
       const score = wordSimilarity(flag.text, raw);
       if (score > bestScore) { bestScore = score; coveringId = id; }
     }
@@ -911,12 +954,13 @@ function toggleFlag() {
 let flagUiTimer = null;
 
 function refreshFlags() {
-  const n = flags.size;
-  flagsRow.hidden = n === 0;
+  const n = userFlagCount();
+  const hasResume = resumeFlagId() !== null;
+  flagsRow.hidden = flags.size === 0;
   flagsInfo.textContent = n
     ? `⚑ ${n} flagged sentence${n === 1 ? '' : 's'} — F10 jumps to the next`
-    : '';
-  if (n === 0) flagPanel.hidden = true;
+    : (hasResume ? '▸ Resume point saved — open the panel to jump back' : '');
+  if (flags.size === 0) flagPanel.hidden = true;
   flagPanelToggle.textContent = flagPanel.hidden ? 'Show' : 'Hide';
   // The panel and backdrop markers need full flag resolution; coalesce bursts
   // (rapid F9 presses, bulk session loads) into one deferred update.
@@ -930,10 +974,12 @@ function refreshFlags() {
 
 function renderFlagPanel() {
   const resolved = resolveFlags();
+  resolved.sort((a, b) => (b.flag.kind === 'resume' ? 1 : 0) - (a.flag.kind === 'resume' ? 1 : 0));
   flagPanel.textContent = '';
   for (const r of resolved) {
     const li = document.createElement('li');
     li.className = r.state === 'lost' ? 'flag-lost' : (r.state === 'edited' ? 'flag-edited' : '');
+    if (r.flag.kind === 'resume') li.className += ' flag-resume';
     const span = document.createElement('span');
     span.className = 'flag-text';
     const shown = (r.seg ? draft.value.slice(r.seg.start, r.seg.end) : r.flag.text);
@@ -977,21 +1023,21 @@ function jumpToFlag(id) {
 
 function nextFlag() {
   if (!flags.size || mode !== 'idle') return;
-  const placed = resolveFlags().filter((r) => r.seg);
+  const placed = resolveFlags().filter((r) => r.seg && r.flag.kind !== 'resume');
   if (!placed.length) return;
   const target = placed.find((r) => r.seg.start > draft.selectionEnd) || placed[0];
   jumpToFlag(target.id);
 }
 
 function flagReport() {
-  const resolved = resolveFlags();
+  const resolved = resolveFlags().filter((r) => r.flag.kind !== 'resume');
   const lines = resolved.map((r, i) => {
     const body = r.seg ? draft.value.slice(r.seg.start, r.seg.end) : r.flag.text;
     const note = r.state === 'lost' ? ' [no longer found in the draft]' : '';
     return `${i + 1}. ${body}${note}`;
   });
   void saveOrDownload('report', 'read-aloud-flags.txt',
-    new Blob([`Flagged sentences (${flags.size})\n\n` + lines.join('\n\n') + '\n'], {type: 'text/plain'}), 'Flag report saved');
+    new Blob([`Flagged sentences (${userFlagCount()})\n\n` + lines.join('\n\n') + '\n'], {type: 'text/plain'}), 'Flag report saved');
 }
 
 function finishReading() {
@@ -1009,6 +1055,13 @@ function finishReading() {
 }
 
 /* ------------------------ Render and export ---------------------- */
+
+// Sentences newly synthesized by the last Render / Update pass get a brief
+// tint on the backdrop (spec 4.3) — a quiet "this one was re-recorded".
+const TINT_MS = window.__RA_TINT_MS || 2200;
+let freshTint = [];      // [{s, e}] spans in draft offsets
+let freshTintUntil = 0;  // wall-clock expiry, set when the render finishes
+let freshTintDocLen = 0; // spans are only valid while the text is unchanged
 
 function startRender() {
   if (!ready) return;
@@ -1033,6 +1086,8 @@ function startRender() {
   playPos = 0;
   genPos = 0;
   renderReused = 0;
+  freshTint = [];
+  freshTintDocLen = text.length;
   updateButtons();
   showRenderProgress();
   pumpGenerator();
@@ -1057,6 +1112,10 @@ function finishRender() {
   mode = 'idle';
   runToken++;
   segments = [];
+  if (freshTint.length) {
+    freshTintUntil = Date.now() + TINT_MS;
+    setTimeout(() => { freshTint = []; if (mode === 'idle') syncIdleBackdrop(); }, TINT_MS + 60);
+  }
   syncIdleBackdrop();
   setStatus(
     'ready',
@@ -1319,6 +1378,7 @@ function stopAll({restarting = false, keepCaret = false} = {}) {
   clearHighlight();
   if (!restarting) {
     if (wasPlaying && seg && !keepCaret) draft.setSelectionRange(seg.start, seg.start);
+    if (wasPlaying && seg) setResumeFlag(seg);
     setStatus('ready', 'Stopped', wasPlaying ? 'Press F8 to resume from this sentence.' : 'Rendering cancelled. Finished sentences are kept.');
     updateButtons();
     describeSelection();
@@ -1438,9 +1498,12 @@ function syncIdleBackdrop() {
   if (mode !== 'idle') return;
   const text = draft.value;
   const decorations = lintRanges.map(([a, b]) => ({s: a, e: b, cls: 'lint'}));
+  if (freshTint.length && Date.now() < freshTintUntil && draft.value.length === freshTintDocLen) {
+    for (const f of freshTint) decorations.push({s: f.s, e: f.e, cls: 'fresh'});
+  }
   if (flags.size) {
     for (const r of resolveFlags()) {
-      if (r.seg) decorations.push({s: r.seg.start, e: r.seg.end, cls: 'flagmark'});
+      if (r.seg) decorations.push({s: r.seg.start, e: r.seg.end, cls: r.flag.kind === 'resume' ? 'resumemark' : 'flagmark'});
     }
   }
   if (!decorations.length) {
@@ -1595,6 +1658,8 @@ function currentSettings() {
     pitch: Number(pitch.value),
     delivery: deliveryPreset,
     autosave: autosaveToggle.checked,
+    sections: (playbackGroup.open ? 1 : 0) | (displayGroup.open ? 2 : 0),
+    cleanPaste: cleanPasteToggle.checked,
     step: stepToggle.checked,
     focus: focusToggle.checked,
     labels: labelsToggle.checked,
@@ -1622,6 +1687,11 @@ function applySettingsObject(obj) {
   if (obj.font === 'serif' || obj.font === 'hyper') fontSelect.value = obj.font;
   if (obj.theme === 'auto' || obj.theme === 'light' || obj.theme === 'dark') themeSelect.value = obj.theme;
   if (typeof obj.step === 'boolean') stepToggle.checked = obj.step;
+  if (typeof obj.cleanPaste === 'boolean') cleanPasteToggle.checked = obj.cleanPaste;
+  if (Number.isInteger(obj.sections) && obj.sections >= 0 && obj.sections <= 3) {
+    playbackGroup.open = (obj.sections & 1) !== 0;
+    displayGroup.open = (obj.sections & 2) !== 0;
+  }
   if (typeof obj.autosave === 'boolean' && obj.autosave !== autosaveToggle.checked) {
     autosaveToggle.checked = obj.autosave;
     applyAutosaveState();
@@ -1742,6 +1812,47 @@ function applyAutosaveState() {
   }
 }
 
+/* --------------------- Paste cleanup (spec 4.4) -------------------- */
+// Straightens smart punctuation and strips invisible characters that trip
+// TTS. Runs on the pasted region only; the Tidy button applies it to the
+// whole draft. Paragraph breaks are always preserved exactly.
+
+function cleanText(t) {
+  return String(t)
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/\u2014/g, '--')
+    .replace(/[\u2013\u2012]/g, '-')
+    .replace(/\u2026/g, '...')
+    .replace(/[\u00AD\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
+}
+
+// Insert while keeping native textarea undo when the browser allows it.
+function insertCleaned(text) {
+  let ok = false;
+  try { ok = document.execCommand('insertText', false, text); } catch (_) { ok = false; }
+  if (!ok) {
+    draft.setRangeText(text, draft.selectionStart, draft.selectionEnd, 'end');
+    draft.dispatchEvent(new Event('input', {bubbles: true}));
+  }
+}
+
+function tidyDraft() {
+  const cleaned = cleanText(draft.value);
+  if (cleaned === draft.value) {
+    setStatus('ready', 'Already tidy', 'No smart quotes or hidden characters found.');
+    return;
+  }
+  stopAll({restarting: true});
+  draft.focus();
+  draft.setSelectionRange(0, draft.value.length);
+  insertCleaned(cleaned);
+  draft.setSelectionRange(0, 0);
+  setStatus('ready', 'Text tidied', 'Quotes straightened and hidden characters removed. Undo reverses it.');
+}
+
 /* ------------------- Text out and file drop in -------------------- */
 
 function copyAllText() {
@@ -1856,11 +1967,13 @@ function openSessionData(text) {
       if (typeof f === 'string') {
         flags.set(++flagIdCounter, {text: f, before: '', after: ''}); // old session format
       } else if (f && typeof f.text === 'string') {
-        flags.set(++flagIdCounter, {
+        const entry = {
           text: f.text.slice(0, 2000),
           before: String(f.before || '').slice(0, CONTEXT_CHARS * 2),
           after: String(f.after || '').slice(0, CONTEXT_CHARS * 2),
-        });
+        };
+        if (f.kind === 'resume' && resumeFlagId() === null) entry.kind = 'resume';
+        flags.set(++flagIdCounter, entry);
       }
     }
   }
@@ -2002,6 +2115,23 @@ importYes.addEventListener('click', () => {
   pendingImport = null;
 });
 importNo.addEventListener('click', () => { importBanner.hidden = true; pendingImport = null; });
+function toggleHelp(force) {
+  helpOverlay.hidden = force !== undefined ? !force : !helpOverlay.hidden;
+}
+helpButton.addEventListener('click', () => toggleHelp());
+helpClose.addEventListener('click', () => toggleHelp(false));
+helpOverlay.addEventListener('click', (e) => { if (e.target === helpOverlay) toggleHelp(false); });
+tidyButton.addEventListener('click', tidyDraft);
+draft.addEventListener('paste', (e) => {
+  if (!cleanPasteToggle.checked) return;
+  const clip = e.clipboardData || window.clipboardData;
+  const data = clip && clip.getData ? clip.getData('text/plain') : null;
+  if (typeof data !== 'string' || !data) return;
+  const cleaned = cleanText(data);
+  if (cleaned === data) return; // nothing to fix: let the browser paste natively
+  e.preventDefault();
+  insertCleaned(cleaned);
+});
 draft.addEventListener('dragover', (e) => e.preventDefault());
 draft.addEventListener('drop', (e) => {
   e.preventDefault();
@@ -2123,6 +2253,16 @@ if (typeof ResizeObserver !== 'undefined') {
 }
 
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !helpOverlay.hidden) {
+    toggleHelp(false);
+    event.preventDefault();
+    return;
+  }
+  if (event.key === '?' && document.activeElement !== draft && document.activeElement !== settingsBox) {
+    toggleHelp();
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'F8') {
     event.preventDefault();
     if (awaitingStep) stepAdvance();

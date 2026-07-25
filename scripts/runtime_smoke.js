@@ -158,14 +158,17 @@ async function waitForHealth(base, timeoutMs) {
         attr: document.documentElement.dataset.theme,
         colorScheme: getComputedStyle(document.documentElement).colorScheme,
         focusTextarea: taColor,
-        flagsRowDisplay: getComputedStyle(document.getElementById('flagsRow')).display,
+        hiddenBannerDisplay: getComputedStyle(document.getElementById('importBanner')).display,
+        resumeVisible: !!document.querySelector('#backdropContent u.resumemark') ||
+          getComputedStyle(document.getElementById('flagsRow')).display !== 'none',
         bodyBg: getComputedStyle(document.body).backgroundColor,
       };
     });
     check('dark theme attribute applied', dark.attr === 'dark', dark.attr);
     check('color-scheme follows theme', dark.colorScheme === 'dark', dark.colorScheme);
     check('focus mode keeps textarea transparent in dark', dark.focusTextarea === 'rgba(0, 0, 0, 0)', dark.focusTextarea);
-    check('hidden flags row computes display none', dark.flagsRowDisplay === 'none', dark.flagsRowDisplay);
+    check('hidden banner computes display none', dark.hiddenBannerDisplay === 'none', dark.hiddenBannerDisplay);
+    check('resume marker present after the earlier stop', dark.resumeVisible === true);
     await page.screenshot({path: path.join(outDir, 'dark.png'), fullPage: true});
     await page.selectOption('#themeSelect', 'light');
 

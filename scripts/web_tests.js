@@ -931,6 +931,125 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     check('restore: dismiss keeps the draft empty', $('restoreBanner').hidden === true && $('draft').value === '');
   }
 
+  /* ============ phase 5 polish ============ */
+  {
+    const world = await makeWorld((wd) => { wd.w.__RA_TINT_MS = 120; });
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    const key = (k, opts = {}) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: k, ...opts}));
+    const sendResult = () => world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-result', samples: new Float32Array(8), sampleRate: 22050}});
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    const draft = $('draft');
+
+    // grouped controls
+    check('polish: playback and display groups exist and default open',
+      $('playbackGroup').open === true && $('displayGroup').open === true);
+    $('displayGroup').open = false;
+    $('settingsShow').click();
+    check('polish: collapsed state lands in the settings string', /"sections":1[,}]/.test($('settingsBox').value), $('settingsBox').value.slice(0, 200));
+    $('settingsBox').value = 'RA1 {"sections":2}';
+    $('settingsApply').click();
+    check('polish: sections apply restores open state', $('playbackGroup').open === false && $('displayGroup').open === true);
+    $('settingsBox').value = 'RA1 {"sections":3}';
+    $('settingsApply').click();
+
+    // help overlay
+    check('polish: overlay hidden at start', $('helpOverlay').hidden === true);
+    w.document.body.focus && w.document.body.focus();
+    draft.blur();
+    key('?');
+    check('polish: ? opens the shortcut overlay', $('helpOverlay').hidden === false);
+    key('Escape');
+    check('polish: Esc closes the overlay without touching playback', $('helpOverlay').hidden === true);
+    $('helpButton').click();
+    check('polish: help button opens it too', $('helpOverlay').hidden === false);
+    $('helpClose').click();
+    check('polish: close button works', $('helpOverlay').hidden === true);
+
+    // paste cleanup
+    draft.focus();
+    const pasteEv = new w.Event('paste', {bubbles: true, cancelable: true});
+    pasteEv.clipboardData = {getData: () => '\u201CSmart\u201D \u2014 it\u2019s\u00ADhere\u2026'};
+    draft.dispatchEvent(pasteEv);
+    check('polish: paste is straightened and de-invisibled', draft.value === '"Smart" -- it\'shere...', JSON.stringify(draft.value));
+    check('polish: cleaning paste prevents the raw default', pasteEv.defaultPrevented === true);
+    $('cleanPasteToggle').checked = false;
+    const pasteOff = new w.Event('paste', {bubbles: true, cancelable: true});
+    pasteOff.clipboardData = {getData: () => '\u201CRaw\u201D'};
+    draft.dispatchEvent(pasteOff);
+    check('polish: toggle off leaves paste alone', pasteOff.defaultPrevented === false);
+    $('cleanPasteToggle').checked = true;
+
+    // tidy whole draft
+    draft.value = 'Already \u2018quoted\u2019 text.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    $('tidyButton').click(); await tick();
+    check('polish: tidy cleans the whole draft', draft.value === "Already 'quoted' text.", JSON.stringify(draft.value));
+
+    // fresh-render tint
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    draft.value = 'First bit. Second bit.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    $('renderButton').click(); await tick();
+    sendResult(); await tick(); sendResult(); await tick(); sendResult(); await tick();
+    check('polish: freshly rendered sentences carry the tint',
+      $('backdropContent').querySelectorAll('u.fresh').length >= 1, $('backdropContent').innerHTML.slice(0, 200));
+    await new Promise((r) => setTimeout(r, 240)); await tick();
+    check('polish: tint fades after its moment', $('backdropContent').querySelector('u.fresh') === null);
+
+    // resume marker lifecycle
+    draft.value = 'Alpha one. Beta two. Gamma three.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    sendResult(); await tick(); await tick();
+    key('Escape'); await new Promise((r) => setTimeout(r, 60));
+    check('polish: stopping leaves a resume marker in the backdrop',
+      $('backdropContent').querySelector('u.resumemark') !== null, $('backdropContent').innerHTML.slice(0, 200));
+    check('polish: resume alone announces itself without a flag count',
+      /Resume point saved/.test($('flagsInfo').textContent), $('flagsInfo').textContent);
+    $('flagPanelToggle').click(); await new Promise((r) => setTimeout(r, 60));
+    const firstItem = $('flagPanel').querySelector('li');
+    check('polish: resume is the pinned first panel row', firstItem !== null && firstItem.className.includes('flag-resume'), $('flagPanel').innerHTML.slice(0, 200));
+    $('flagReportButton').click(); await settle();
+    check('polish: resume never appears in the report',
+      saveBuf(world, 'report').toString('utf8').startsWith('Flagged sentences (0)') &&
+      !saveBuf(world, 'report').toString('utf8').includes('Alpha one'), saveBuf(world, 'report').toString('utf8'));
+    $('sessionSave').click(); await settle();
+    const sess = JSON.parse(saveBuf(world, 'session').toString('utf8'));
+    check('polish: resume rides in session files', sess.flags.some((f) => f.kind === 'resume'));
+    draft.setSelectionRange(0, 0);
+    key('F8'); await tick();
+    check('polish: resuming reads from cache instantly', world.liveSources.length === 1);
+    key('Escape'); await new Promise((r) => setTimeout(r, 60));
+  }
+
+  /* ============ resume clears on replay ============ */
+  {
+    const world = await makeWorld();
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: k}));
+    const sendResult = () => world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-result', samples: new Float32Array(8), sampleRate: 22050}});
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    const draft = $('draft');
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    draft.value = 'Solo sentence.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    sendResult(); await tick(); await tick();
+    key('Escape'); await new Promise((r) => setTimeout(r, 60));
+    check('resume: marker exists after stop', $('backdropContent').querySelector('u.resumemark') !== null);
+    draft.setSelectionRange(0, 0);
+    key('F8'); await tick(); await new Promise((r) => setTimeout(r, 60));
+    check('resume: replaying its sentence clears the marker while reading',
+      w.document.querySelectorAll('#backdropContent u.resumemark').length === 0);
+    key('Escape');
+  }
+
   const passed = results.filter(r => r[0]).length;
   for (const [ok, name] of results) console.log(ok ? 'PASS' : 'FAIL', name);
   console.log(`\n[${dir}] ${passed}/${results.length} checks passed`);
