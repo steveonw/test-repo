@@ -1025,6 +1025,37 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     key('Escape'); await new Promise((r) => setTimeout(r, 60));
   }
 
+  /* ============ clear leaves nothing behind ============ */
+  {
+    const world = await makeWorld();
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: k}));
+    const sendResult = () => world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-result', samples: new Float32Array(8), sampleRate: 22050}});
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    const draft = $('draft');
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    draft.value = 'The the cat sat. Second sentence here.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    sendResult(); await tick(); await tick();
+    key('F9'); // one user flag while playing
+    key('Escape'); await new Promise((r) => setTimeout(r, 60));
+    check('clear: decorations present before clearing',
+      $('backdropContent').querySelector('u') !== null, $('backdropContent').innerHTML.slice(0, 120));
+    $('clearButton').click(); await new Promise((r) => setTimeout(r, 60));
+    check('clear: backdrop repainted empty — no stale underlines',
+      $('backdropContent').querySelector('u') === null && $('backdropContent').textContent === '', $('backdropContent').innerHTML.slice(0, 120));
+    check('clear: resume bookmark dropped by a deliberate wipe',
+      !/Resume point saved/.test($('flagsInfo').textContent), $('flagsInfo').textContent);
+    check('clear: user flags survive with their own button intact',
+      /1 flagged/.test($('flagsInfo').textContent) && $('flagsRow').hidden === false, $('flagsInfo').textContent);
+    $('flagClearButton').click();
+    check('clear: clear-flags still hides the row afterwards', $('flagsRow').hidden === true);
+  }
+
   /* ============ resume clears on replay ============ */
   {
     const world = await makeWorld();

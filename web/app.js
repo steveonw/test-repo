@@ -2159,9 +2159,13 @@ quitButton.addEventListener('click', () => {
 clearButton.addEventListener('click', () => {
   stopAll({restarting: true});
   draft.value = '';
+  // A deliberate wipe drops the transient resume bookmark; user flags are
+  // kept (they have their own Clear flags button) but repaint as nothing.
+  const rid = resumeFlagId();
+  if (rid !== null) flags.delete(rid);
+  refreshFlags();
   draft.focus();
-  runLint();
-  updateStats();
+  runHeavyEditorWork(); // same pipeline as an edit: lint, stats, backdrop repaint
   if (ready) setStatus('ready', `${voiceName()} is ready`, 'Paste text, then press F8 or render the draft.');
   updateButtons();
   describeSelection();
