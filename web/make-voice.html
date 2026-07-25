@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Read Aloud — Voice Package Maker</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .mv main { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+  .mv .card { border: 1px solid rgba(122,136,169,.25); border-radius: 16px; padding: 18px; margin: 14px 0; background: rgba(255,255,255,.72); }
+  .mv label { display: block; margin: 10px 0 4px; font-weight: 600; }
+  .mv input[type=text] { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid #c9d0e0; font: inherit; }
+  .mv ul#checks { list-style: none; padding: 0; }
+  .mv #checks .ok { color: #2f7d4f; }
+  .mv #checks .bad { color: #a04a34; }
+  .mv #checks .soft { color: #8a6d3b; }
+  .mv #status { margin-top: 10px; min-height: 1.4em; font-weight: 600; }
+  .mv .family { font-size:.8rem; font-weight:600; margin:0 0 8px; padding:4px 9px; border-radius:999px; display:inline-block; }
+  .mv .family.vits { background:#e8ecf9; color:#3a4a8a; }
+  .mv .family.kitten { background:#e6f2e6; color:#2f7d4f; }
+  .mv .family.warnfam { background:#fbeede; color:#a04a34; }
+  .mv #speakerRow { margin:10px 0; }
+  :root[data-theme="dark"] .mv .card { background: rgba(29,37,56,.75); border-color: #303a53; }
+</style>
+</head>
+<body class="mv">
+<main>
+  <h1>Voice Package Maker</h1>
+  <p>Turn a downloaded voice into a ready-to-use Read Aloud package. Two families work:
+  <strong>Piper VITS</strong> (model + tokens) and <strong>KittenTTS</strong> (model + tokens +
+  <code>voices.bin</code>, several speakers in one file). The model file is sniffed automatically, so
+  just drop in what you have. Everything happens on this computer; nothing is uploaded.</p>
+  <section class="card">
+    <label>1 — Model file (<code>.onnx</code>)</label>
+    <input type="file" id="modelFile" accept=".onnx">
+    <label>2 — Tokens file (<code>tokens.txt</code>)</label>
+    <input type="file" id="tokensFile" accept=".txt">
+    <label>3 — Style rows (<code>voices.bin</code>) — KittenTTS packages only</label>
+    <input type="file" id="voicesFile" accept=".bin">
+    <label>4 — Piper config (<code>.onnx.json</code>, optional but recommended)</label>
+    <input type="file" id="configFile" accept=".json">
+    <label>5 — Display name</label>
+    <input type="text" id="voiceName" placeholder="Alba (Scottish)">
+    <label>6 — Folder id</label>
+    <input type="text" id="voiceId" placeholder="alba-medium">
+  </section>
+  <section class="card">
+    <p id="family" class="family vits"></p>
+    <ul id="checks"></ul>
+    <div id="speakerRow" hidden>
+      <label for="speakerId">Speaker (KittenTTS models carry several in one file)</label>
+      <input type="number" id="speakerId" min="0" max="7" value="0" style="width:90px;padding:8px 10px;border-radius:10px;border:1px solid #c9d0e0;font:inherit;">
+    </div>
+    <p id="benchNote"></p>
+    <label for="testText">Test sentence</label>
+    <input type="text" id="testText" value="The quick brown fox jumps over the lazy dog.">
+    <button id="testBtn" type="button" disabled>▶ Test this voice</button>
+    <button id="downloadBtn" type="button" disabled>⤓ Download voice package (.zip)</button>
+    <p id="status"></p>
+  </section>
+</main>
+<script src="make-voice.js"></script>
+</body>
+</html>

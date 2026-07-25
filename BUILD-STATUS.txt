@@ -1,0 +1,24 @@
+BUILD STATUS
+============
+
+Completed and tested in this package:
+- Shared proofreading web interface source
+- Pure-Go local server/launcher source
+- Windows x64 launcher binary
+- Linux x64 static launcher binary
+- macOS Intel launcher binary
+- macOS Apple Silicon launcher binary
+- macOS universal launcher containing both architectures
+- Linux local HTTP serving and MIME/header smoke test
+- USB assembly, checksums, Mac app packaging, and GitHub Actions workflow
+
+Generated during the online build step:
+- Sherpa-onnx WebAssembly engine
+- Emscripten data package containing the converted en_US-amy-medium model,
+  tokens.txt, and espeak-ng-data
+- Final dist/ReadAloudUSB.zip
+
+Why the large speech payload is not embedded in this source ZIP:
+It is generated from official upstream files and is roughly 100 MB. The included
+GitHub Actions workflow performs that reproducible build and returns the final
+USB ZIP. The completed USB app is fully offline at runtime.

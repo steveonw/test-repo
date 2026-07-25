@@ -1,0 +1,62 @@
+Read Aloud Portable — third-party notices and attribution
+=========================================================
+
+Read Aloud is possible because of the open-source projects below. Their
+license files ship with their sources; this notice credits every component
+that this builder downloads, compiles into the bundle, or redistributes.
+If you share a completed USB bundle, share this file with it.
+
+Speech engine
+-------------
+- sherpa-onnx (k2-fsa / Xiaomi Corporation) — Apache License 2.0
+  https://github.com/k2-fsa/sherpa-onnx
+  The WebAssembly TTS engine, its JavaScript wrapper (sherpa-onnx-tts.js),
+  and the worker protocol this app's voice worker is derived from.
+- ONNX Runtime (Microsoft Corporation) — MIT License
+  https://github.com/microsoft/onnxruntime
+  The neural-network inference library linked into the engine.
+- espeak-ng — GNU General Public License v3.0
+  https://github.com/espeak-ng/espeak-ng (built via csukuangfj/espeak-ng)
+  Text-to-phoneme processing and the language data in the shared engine
+  payload. Note: espeak-ng is GPLv3; treat the combined engine accordingly
+  when redistributing.
+- piper-phonemize (Rhasspy / Michael Hansen; csukuangfj fork) — MIT License
+  https://github.com/rhasspy/piper-phonemize
+- kaldi-native-fbank (csukuangfj) — Apache License 2.0
+  https://github.com/csukuangfj/kaldi-native-fbank
+- OpenFst (Google) — Apache License 2.0
+  https://www.openfst.org
+- Emscripten (Emscripten contributors) — MIT / University of Illinois-NCSA
+  https://emscripten.org
+  Runtime support code embedded in the generated WebAssembly glue.
+
+Voices
+------
+- Piper (Rhasspy / Michael Hansen) — MIT License
+  https://github.com/rhasspy/piper
+  The VITS voice models (e.g. Amy Medium, Lessac High) were trained by the
+  Piper project. Individual voices are built from public speech datasets
+  whose terms vary by voice; before redistributing a specific voice, check
+  its entry in Piper's VOICES.md:
+  https://github.com/rhasspy/piper/blob/master/VOICES.md
+  Voice packages added with the Voice Package Maker carry the license of
+  whatever model you put in them — credit its source the same way.
+
+Audio export
+------------
+- lamejs (Kobayashi / zhuker; derived from LAME) — LGPL
+  https://github.com/zhuker/lamejs — shipped as shared/vendor/lame.min.js
+  MP3 encoding. LAME itself: https://lame.sourceforge.io
+
+Fonts
+-----
+- Atkinson Hyperlegible (Braille Institute of America) — SIL Open Font
+  License 1.1 — full text shipped at shared/fonts/OFL-LICENSE.txt
+
+Launcher
+--------
+- The Go standard library (The Go Authors) — BSD-style license
+  https://go.dev/LICENSE — compiled into the platform launchers.
+
+Thank you to every maintainer and contributor of these projects, and to the
+dataset speakers whose recorded voices make offline reading aloud possible.

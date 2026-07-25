@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Start Read Aloud</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #172033; background: #eef1f7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+    main { width: min(720px, 100%); padding: 34px; border-radius: 22px; background: white; box-shadow: 0 20px 60px rgba(35,45,80,.15); }
+    .tag { color: #5368e8; font-size: .75rem; font-weight: 800; letter-spacing: .12em; }
+    h1 { margin: 8px 0 10px; font-size: clamp(2rem, 7vw, 4rem); letter-spacing: -.05em; }
+    p { color: #5f6a80; line-height: 1.55; }
+    .choice { display: none; margin: 24px 0 10px; padding: 20px; border: 2px solid #7183ff; border-radius: 15px; background: #f5f7ff; }
+    .choice.active { display: block; }
+    code { padding: 3px 7px; border-radius: 6px; background: #e8ebf5; color: #1c2844; }
+    ul { padding-left: 22px; color: #5f6a80; line-height: 1.7; }
+    .small { font-size: .88rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="tag">READ ALOUD USB</div>
+    <h1>Start here</h1>
+    <p>This page identifies the computer and points to the correct offline launcher. Browsers cannot safely start programs automatically, so open the named item from the USB folder.</p>
+
+    <section id="windows" class="choice">
+      <strong>Windows detected</strong>
+      <p>Double-click <code>START - WINDOWS.exe</code>.</p>
+    </section>
+    <section id="macos" class="choice">
+      <strong>macOS detected</strong>
+      <p>Double-click <code>START - MACOS.app</code>. The first unsigned personal build may need approval in Privacy &amp; Security.</p>
+    </section>
+    <section id="linux" class="choice">
+      <strong>Linux detected</strong>
+      <p>Open <code>START - LINUX.sh</code>. If your file manager opens it as text, run <code>bash "START - LINUX.sh"</code> from a terminal.</p>
+    </section>
+    <section id="unknown" class="choice">
+      <strong>Choose your system</strong>
+      <ul>
+        <li>Windows: <code>START - WINDOWS.exe</code></li>
+        <li>macOS: <code>START - MACOS.app</code></li>
+        <li>Linux: <code>START - LINUX.sh</code></li>
+      </ul>
+    </section>
+
+    <p class="small">Keep the <code>shared</code> folder beside the launchers. The Amy model and speech engine live there once the builder has completed.</p>
+  </main>
+  <script>
+    const ua = navigator.userAgent.toLowerCase();
+    let id = 'unknown';
+    if (ua.includes('windows')) id = 'windows';
+    else if (ua.includes('mac os') || ua.includes('macintosh')) id = 'macos';
+    else if (ua.includes('linux')) id = 'linux';
+    document.getElementById(id).classList.add('active');
+  </script>
+</body>
+</html>
