@@ -236,3 +236,26 @@ func scanVoices(voicesDir string) ([]VoiceInfo, []InvalidVoice) {
 	sort.Slice(valid, func(i, j int) bool { return valid[i].Name < valid[j].Name })
 	return valid, invalid
 }
+
+// Addons are optional feature folders on the drive (spec 3.6): the feature
+// exists only if its folder does, so deleting the folder removes the code
+// path entirely. Lives here beside the voice scanner because it is the same
+// job — reading a folder on the stick and reporting what is safely there.
+var addonNameRe = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
+
+// scanAddons lists the addon folders present on the drive. Only plain,
+// lowercase folder names are reported; anything else is ignored rather than
+// exposed to the page.
+func scanAddons(dir string) []string {
+	out := []string{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return out // no addons folder: perfectly normal
+	}
+	for _, e := range entries {
+		if e.IsDir() && addonNameRe.MatchString(e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}

@@ -111,3 +111,22 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+func TestScanAddons(t *testing.T) {
+	if got := scanAddons(filepath.Join(t.TempDir(), "missing")); len(got) != 0 {
+		t.Fatalf("missing dir must report no addons, got %v", got)
+	}
+	root := t.TempDir()
+	for _, d := range []string{"docx", "some-addon", "BadName", ".hidden"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "loosefile.js"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := scanAddons(root)
+	if len(got) != 2 || got[0] != "docx" || got[1] != "some-addon" {
+		t.Fatalf("want [docx some-addon], got %v", got)
+	}
+}
