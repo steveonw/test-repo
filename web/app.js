@@ -66,6 +66,7 @@ const helpOverlay = document.getElementById('helpOverlay');
 const helpClose = document.getElementById('helpClose');
 const tidyButton = document.getElementById('tidyButton');
 const cleanPasteToggle = document.getElementById('cleanPasteToggle');
+const resumeToggle = document.getElementById('resumeToggle');
 const playbackGroup = document.getElementById('playbackGroup');
 const displayGroup = document.getElementById('displayGroup');
 const editorStack = document.querySelector('.editor-stack');
@@ -151,7 +152,7 @@ function pitchResample(samples, p) {
 // The speakers a voice offers: the package's named list when it declares one,
 // otherwise auto-named from the engine's reported speaker count.
 function speakerListFor(voice) {
-  if (!voice || voice.architecture !== 'kitten' || voice.lockedSpeaker) return [];
+  if (!voice || voice.lockedSpeaker) return [];
   if (Array.isArray(voice.speakers) && voice.speakers.length) return voice.speakers;
   const n = voice.numSpeakers || 0;
   if (n < 2) return [];
@@ -1378,7 +1379,7 @@ function stopAll({restarting = false, keepCaret = false} = {}) {
   clearHighlight();
   if (!restarting) {
     if (wasPlaying && seg && !keepCaret) draft.setSelectionRange(seg.start, seg.start);
-    if (wasPlaying && seg) setResumeFlag(seg);
+    if (wasPlaying && seg && resumeToggle.checked) setResumeFlag(seg);
     setStatus('ready', 'Stopped', wasPlaying ? 'Press F8 to resume from this sentence.' : 'Rendering cancelled. Finished sentences are kept.');
     updateButtons();
     describeSelection();
@@ -1660,6 +1661,7 @@ function currentSettings() {
     autosave: autosaveToggle.checked,
     sections: (playbackGroup.open ? 1 : 0) | (displayGroup.open ? 2 : 0),
     cleanPaste: cleanPasteToggle.checked,
+    resume: resumeToggle.checked,
     step: stepToggle.checked,
     focus: focusToggle.checked,
     labels: labelsToggle.checked,
@@ -1688,6 +1690,13 @@ function applySettingsObject(obj) {
   if (obj.theme === 'auto' || obj.theme === 'light' || obj.theme === 'dark') themeSelect.value = obj.theme;
   if (typeof obj.step === 'boolean') stepToggle.checked = obj.step;
   if (typeof obj.cleanPaste === 'boolean') cleanPasteToggle.checked = obj.cleanPaste;
+  if (typeof obj.resume === 'boolean' && obj.resume !== resumeToggle.checked) {
+    resumeToggle.checked = obj.resume;
+    if (!obj.resume) {
+      const rid = resumeFlagId();
+      if (rid !== null) { flags.delete(rid); refreshFlags(); }
+    }
+  }
   if (Number.isInteger(obj.sections) && obj.sections >= 0 && obj.sections <= 3) {
     playbackGroup.open = (obj.sections & 1) !== 0;
     displayGroup.open = (obj.sections & 2) !== 0;
@@ -1706,7 +1715,7 @@ function applySettingsObject(obj) {
     speakerChoice = {};
     for (const [k, v] of Object.entries(obj.speaker).slice(0, 50)) {
       const n = Number(v);
-      if (/^[a-z0-9-]{1,64}$/.test(k) && Number.isInteger(n) && n >= 0 && n <= 255) speakerChoice[k] = n;
+      if (/^[a-z0-9-]{1,64}$/.test(k) && Number.isInteger(n) && n >= 0 && n <= 4095) speakerChoice[k] = n;
     }
     if (currentVoice && !currentVoice.lockedSpeaker && Number.isInteger(speakerChoice[currentVoice.id])) {
       currentSpeaker = speakerChoice[currentVoice.id];
@@ -2122,6 +2131,12 @@ helpButton.addEventListener('click', () => toggleHelp());
 helpClose.addEventListener('click', () => toggleHelp(false));
 helpOverlay.addEventListener('click', (e) => { if (e.target === helpOverlay) toggleHelp(false); });
 tidyButton.addEventListener('click', tidyDraft);
+resumeToggle.addEventListener('input', () => {
+  if (!resumeToggle.checked) {
+    const rid = resumeFlagId();
+    if (rid !== null) { flags.delete(rid); refreshFlags(); }
+  }
+});
 draft.addEventListener('paste', (e) => {
   if (!cleanPasteToggle.checked) return;
   const clip = e.clipboardData || window.clipboardData;

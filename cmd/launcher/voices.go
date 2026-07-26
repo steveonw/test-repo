@@ -112,6 +112,38 @@ func validateVoiceDir(dir string) (*VoiceManifest, string) {
 		return nil, "model and tokens must be plain filenames inside the package"
 	}
 	required := []string{m.Model, m.Tokens}
+	// Speaker rules are architecture-neutral: kitten carries several speakers
+	// in voices.bin, and multi-speaker VITS models (e.g. LibriTTS-R, 904
+	// speakers) carry them in the model itself. Either way the engine selects
+	// by sid at generate time.
+	if m.SpeakerID != nil && (*m.SpeakerID < 0 || *m.SpeakerID > 4095) {
+		return nil, "speakerId out of range"
+	}
+	if m.Speakers != nil {
+		if m.SchemaVersion < 2 {
+			return nil, "speakers requires schemaVersion 2"
+		}
+		if m.SpeakerID != nil {
+			return nil, "use speakerId or speakers, not both"
+		}
+		if len(m.Speakers) == 0 || len(m.Speakers) > 1024 {
+			return nil, "speakers must list between 1 and 1024 entries"
+		}
+		seenSpk := map[int]bool{}
+		for _, s := range m.Speakers {
+			if s.ID < 0 || s.ID > 4095 {
+				return nil, "speaker id out of range"
+			}
+			if seenSpk[s.ID] {
+				return nil, "duplicate speaker id"
+			}
+			seenSpk[s.ID] = true
+			name := strings.TrimSpace(s.Name)
+			if name == "" || len(name) > 64 {
+				return nil, "every speaker needs a name up to 64 characters"
+			}
+		}
+	}
 	if m.Architecture == "kitten" {
 		if m.Voices == "" {
 			return nil, "kitten packages need a voices file (voices.bin)"
@@ -119,37 +151,7 @@ func validateVoiceDir(dir string) (*VoiceManifest, string) {
 		if !safeAssetName(m.Voices) {
 			return nil, "voices must be a plain filename inside the package"
 		}
-		if m.SpeakerID != nil && (*m.SpeakerID < 0 || *m.SpeakerID > 255) {
-			return nil, "speakerId out of range"
-		}
-		if m.Speakers != nil {
-			if m.SchemaVersion < 2 {
-				return nil, "speakers requires schemaVersion 2"
-			}
-			if m.SpeakerID != nil {
-				return nil, "use speakerId or speakers, not both"
-			}
-			if len(m.Speakers) == 0 || len(m.Speakers) > 256 {
-				return nil, "speakers must list between 1 and 256 entries"
-			}
-			seenSpk := map[int]bool{}
-			for _, s := range m.Speakers {
-				if s.ID < 0 || s.ID > 255 {
-					return nil, "speaker id out of range"
-				}
-				if seenSpk[s.ID] {
-					return nil, "duplicate speaker id"
-				}
-				seenSpk[s.ID] = true
-				name := strings.TrimSpace(s.Name)
-				if name == "" || len(name) > 64 {
-					return nil, "every speaker needs a name up to 64 characters"
-				}
-			}
-		}
 		required = append(required, m.Voices)
-	} else if m.Speakers != nil {
-		return nil, "speakers apply only to kitten packages"
 	}
 	for _, f := range required {
 		if st, err := os.Stat(filepath.Join(dir, f)); err != nil || st.IsDir() {
@@ -199,13 +201,13 @@ func scanVoices(voicesDir string) ([]VoiceInfo, []InvalidVoice) {
 		}
 		if m.Architecture == "kitten" {
 			info.VoicesURL = "voices/" + e.Name() + "/" + m.Voices
-			if m.SpeakerID != nil {
-				info.SpeakerID = *m.SpeakerID
-				info.LockedSpeaker = true // v1-style package: one folder, one pinned speaker
-			}
-			if len(m.Speakers) > 0 {
-				info.Speakers = m.Speakers
-			}
+		}
+		if m.SpeakerID != nil {
+			info.SpeakerID = *m.SpeakerID
+			info.LockedSpeaker = true // package pinned to one speaker
+		}
+		if len(m.Speakers) > 0 {
+			info.Speakers = m.Speakers
 		}
 		valid = append(valid, info)
 	}

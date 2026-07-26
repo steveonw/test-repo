@@ -119,6 +119,10 @@
             <input id="focusToggle" type="checkbox">
             Focus
           </label>
+          <label class="toggle" for="resumeToggle" title="Leave a ▸ marker on the sentence where reading stopped">
+            <input id="resumeToggle" type="checkbox" checked>
+            Resume marker
+          </label>
         </div>
       </details>
       <details class="ctl-group" id="displayGroup" open>
@@ -221,7 +225,10 @@
       <strong>voices</strong> folder next to <strong>shared</strong> on this drive, then relaunch.
       Two families work: <strong>Piper VITS</strong> packages hold <code>voice.json</code>,
       <code>model.onnx</code> and <code>tokens.txt</code>; <strong>KittenTTS</strong> packages add
-      <code>voices.bin</code> and carry several speakers in one file.
+      <code>voices.bin</code> and carry several speakers in one file. Multi-speaker Piper models
+      (such as LibriTTS-R with 904 speakers) work too — the Speaker dropdown appears automatically,
+      and a curated <code>speakers</code> list in <code>voice.json</code> (schemaVersion 2) gives
+      your favorites proper names.
       It will appear in the Voice dropdown automatically. The <a href="make-voice.html">voice package maker</a> can build and test a package from downloaded Piper files. Invalid packages are skipped and reported
       without affecting working voices.</p>
       <p><kbd>F7</kbd> replays the current sentence (or, while stopped, reads the sentence at the cursor once).

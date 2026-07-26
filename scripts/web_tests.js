@@ -1081,6 +1081,96 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     key('Escape');
   }
 
+  /* ============ multi-speaker vits (libritts) ============ */
+  {
+    const world = await makeWorld((wd) => {
+      wd.voiceCatalog = {voices: [
+        {id: 'libritts-r-medium', name: 'LibriTTS-R', quality: 'medium', sampleRate: 22050, architecture: 'vits',
+         speakers: [{id: 12, name: 'Warm Reader'}, {id: 337, name: 'Deep Narrator'}, {id: 903, name: 'Last Row'}],
+         modelUrl: 'voices/libritts/model.onnx', tokensUrl: 'voices/libritts/tokens.txt'},
+        {id: 'libritts-raw', name: 'LibriTTS Raw', quality: 'medium', sampleRate: 22050, architecture: 'vits',
+         modelUrl: 'voices/libritts/model.onnx', tokensUrl: 'voices/libritts/tokens.txt'},
+      ], invalid: []};
+    });
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: k}));
+    const sendResult = () => world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-result', samples: new Float32Array(8), sampleRate: 22050}});
+    const gen = () => world.workerInstance.received;
+
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 904}});
+    check('libritts: curated names shown for a multi-speaker vits voice',
+      $('speakerRow').hidden === false && $('speakerSelect').options.length === 3 &&
+      $('speakerSelect').options[1].textContent === 'Deep Narrator', $('speakerSelect').innerHTML.slice(0, 150));
+    check('libritts: delivery toggle coexists with the speaker picker for vits',
+      $('deliveryRow').hidden === false);
+
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    const draft = $('draft');
+    draft.value = 'Solo sentence.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    $('speakerSelect').value = '337';
+    $('speakerSelect').dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    const workersNow = world.ttsWorkers;
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    check('libritts: generates with a sid beyond the old 255 ceiling',
+      gen().length === 1 && gen()[0].sid === 337 && world.ttsWorkers === workersNow, JSON.stringify(gen()));
+    sendResult(); await tick(); await tick();
+    key('Escape');
+
+    $('settingsBox').value = 'RA1 {"speaker":{"libritts-r-medium":903}}';
+    $('settingsApply').click(); await tick();
+    check('libritts: settings accept high sids', $('speakerSelect').value === '903', $('speakerSelect').value);
+
+    // auto-detection with no curated list: the engine's own count names them
+    $('voiceSelect').value = 'libritts-raw';
+    $('voiceSelect').dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 904}});
+    check('libritts: uncurated package auto-lists every engine speaker',
+      $('speakerRow').hidden === false && $('speakerSelect').options.length === 904 &&
+      $('speakerSelect').options[903].textContent === 'Voice 904', String($('speakerSelect').options.length));
+  }
+
+  /* ============ resume marker toggle ============ */
+  {
+    const world = await makeWorld();
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: k}));
+    const sendResult = () => world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-result', samples: new Float32Array(8), sampleRate: 22050}});
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    const draft = $('draft');
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    draft.value = 'Solo sentence.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+
+    check('resume toggle: on by default', $('resumeToggle').checked === true);
+    draft.setSelectionRange(0, 0);
+    key('F8'); sendResult(); await tick(); await tick();
+    key('Escape'); await new Promise((r) => setTimeout(r, 60));
+    check('resume toggle: marker exists while enabled', $('backdropContent').querySelector('u.resumemark') !== null);
+
+    $('resumeToggle').checked = false;
+    $('resumeToggle').dispatchEvent(new w.Event('input', {bubbles: true}));
+    await new Promise((r) => setTimeout(r, 60));
+    check('resume toggle: turning it off removes the existing marker',
+      $('backdropContent').querySelector('u.resumemark') === null && !/Resume point/.test($('flagsInfo').textContent));
+    draft.setSelectionRange(0, 0);
+    key('F8'); await tick(); await tick();
+    key('Escape'); await new Promise((r) => setTimeout(r, 60));
+    check('resume toggle: no marker is left while disabled',
+      $('backdropContent').querySelector('u.resumemark') === null, $('backdropContent').innerHTML.slice(0, 120));
+
+    $('settingsBox').value = 'RA1 {"resume":true}';
+    $('settingsApply').click();
+    check('resume toggle: settings round trip restores it', $('resumeToggle').checked === true);
+    $('settingsShow').click();
+    check('resume toggle: state lands in the settings string', /"resume":true/.test($('settingsBox').value));
+  }
+
   const passed = results.filter(r => r[0]).length;
   for (const [ok, name] of results) console.log(ok ? 'PASS' : 'FAIL', name);
   console.log(`\n[${dir}] ${passed}/${results.length} checks passed`);
