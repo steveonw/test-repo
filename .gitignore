@@ -1,0 +1,8 @@
+# build outputs — never commit binaries
+launcher
+launcher.exe
+dist/
+node_modules/
+package.json
+package-lock.json
+saves/

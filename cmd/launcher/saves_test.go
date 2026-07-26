@@ -31,11 +31,14 @@ func TestWriteSave(t *testing.T) {
 		t.Fatalf("readAutosave wrong: %q %v", got, ok)
 	}
 
-	// every audio/text/report kind lands in its own folder
-	for _, kind := range []string{"report", "text", "audio"} {
-		if rel, userErr, sysErr := writeSave(root, kind, "f.bin", []byte("x")); userErr != "" || sysErr != nil || !strings.HasPrefix(rel, "saves/"+kind+"/") {
+	// every kind lands in its own folder, with its own allowed extensions
+	for kind, name := range map[string]string{"report": "f.txt", "text": "f.txt", "audio": "f.wav"} {
+		if rel, userErr, sysErr := writeSave(root, kind, name, []byte("x")); userErr != "" || sysErr != nil || !strings.HasPrefix(rel, "saves/"+kind+"/") {
 			t.Fatalf("kind %s failed: %q %q %v", kind, rel, userErr, sysErr)
 		}
+	}
+	if _, userErr, _ := writeSave(root, "audio", "song.MP3", []byte("x")); userErr != "" {
+		t.Fatalf("extension match must be case-insensitive: %q", userErr)
 	}
 
 	// rejections: unknown kinds and anything path-shaped
@@ -46,6 +49,14 @@ func TestWriteSave(t *testing.T) {
 		{"session", `a\b.json`},
 		{"session", ""},
 		{"audio", strings.Repeat("n", 200) + ".wav"},
+		{"text", "payload.hta"},   // P2-2: attacker-chosen file types
+		{"audio", "setup.exe"},
+		{"report", "script.js"},
+		{"session", "CON.json"},   // P3-4: Windows reserved device names
+		{"text", "nul.txt"},
+		{"text", ".hidden.txt"},
+		{"text", "trailingdot.txt."},
+		{"text", "trailingspace.txt "},
 	} {
 		if _, userErr, _ := writeSave(root, bad[0], bad[1], []byte("x")); userErr == "" {
 			t.Fatalf("expected rejection for kind=%q name=%q", bad[0], bad[1])

@@ -62,6 +62,7 @@ function makeWorld(preSeed) {
       return g;
     }
     createBufferSource() {
+      world.sourcesCreated = (world.sourcesCreated || 0) + 1;
       const s = {onended: null, playbackRate: {value: 1}, connect() {}, start() { world.liveSources.push(s); }, stop() { world.liveSources = world.liveSources.filter(x => x !== s); }};
       return s;
     }
@@ -88,6 +89,7 @@ function makeWorld(preSeed) {
     if (String(url) === '/api/save' && opts && opts.method === 'POST') {
       if (world.failSaves) return Promise.resolve({ok: false, status: 507, json: () => Promise.resolve({error: 'the drive is write-protected, so the file could not be saved'})});
       const req = JSON.parse(opts.body);
+      req.headers = opts.headers || {};
       world.saves = world.saves || [];
       world.saves.push(req);
       return Promise.resolve({ok: true, json: () => Promise.resolve({saved: `saves/${req.kind}/${req.name}`})});
@@ -1169,6 +1171,81 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     check('resume toggle: settings round trip restores it', $('resumeToggle').checked === true);
     $('settingsShow').click();
     check('resume toggle: state lands in the settings string', /"resume":true/.test($('settingsBox').value));
+  }
+
+  /* ============ playback queue hardening (BUGS.md P1) ============ */
+  {
+    const world = await makeWorld();
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: k}));
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    const draft = $('draft');
+    const gen = () => world.workerInstance.received;
+    const resultFor = (id) => world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-result', id, samples: new Float32Array(8).fill(0.5), sampleRate: 22050}});
+
+    // P1-1: replies are matched by id — a stale or bogus id changes nothing
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    draft.value = 'Solo sentence.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    check('queue: generate carries a request id', gen().length === 1 && Number.isInteger(gen()[0].id), JSON.stringify(gen()));
+    const realId = gen()[0].id;
+    world.sourcesCreated = 0;
+    resultFor(999999); await tick(); await tick();
+    check('queue: a bogus id is ignored and starts nothing', world.sourcesCreated === 0 && /Generating|Reading|Speaking/.test($('statusTitle').textContent), $('statusTitle').textContent);
+    resultFor(realId); await tick(); await tick();
+    check('queue: the real id plays its own sentence', world.sourcesCreated === 1);
+    key('Escape');
+
+    // P1-2: a result landing inside the inter-sentence gap must not start
+    // audio — the gap timer owns the start, so exactly one source per sentence
+    w.__lastGapWorld = true;
+    draft.value = 'First one. Second one.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    $('gap').value = '0.15';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    world.sourcesCreated = 0;
+    draft.setSelectionRange(0, 0);
+    key('F8');
+    resultFor(gen()[gen().length - 1].id); await tick(); await tick();
+    check('queue: first sentence started once', world.sourcesCreated === 1);
+    const s1 = world.liveSources[0];
+    s1.onended && s1.onended(); await tick();           // gap begins, sentence 2 requested
+    resultFor(gen()[gen().length - 1].id); await tick(); await tick();
+    check('queue: result during the gap starts nothing', world.sourcesCreated === 1, `sources=${world.sourcesCreated}`);
+    await new Promise((r) => setTimeout(r, 220)); await tick();
+    check('queue: the gap timer starts it exactly once', world.sourcesCreated === 2, `sources=${world.sourcesCreated}`);
+    key('Escape');
+
+    // P1-2 step mode: a result while waiting must not speak on its own
+    $('gap').value = '0';
+    $('gap').dispatchEvent(new w.Event('input', {bubbles: true}));
+    $('stepToggle').checked = true;
+    $('stepToggle').dispatchEvent(new w.Event('input', {bubbles: true}));
+    world.sourcesCreated = 0;
+    draft.setSelectionRange(0, 0);
+    key('F8'); await tick();
+    if (gen().length && !world.liveSources.length) { resultFor(gen()[gen().length - 1].id); await tick(); await tick(); }
+    check('queue: step mode first sentence started once', world.sourcesCreated === 1, `sources=${world.sourcesCreated}`);
+    const s2 = world.liveSources[world.liveSources.length - 1];
+    s2.onended && s2.onended(); await tick();            // now awaiting step
+    if (gen().length) resultFor(gen()[gen().length - 1].id); await tick(); await tick();
+    check('queue: result while awaiting step stays silent', world.sourcesCreated === 1, `sources=${world.sourcesCreated}`);
+    key('F8'); await tick(); await tick();
+    check('queue: F8 releases the paused sentence once', world.sourcesCreated === 2, `sources=${world.sourcesCreated}`);
+    key('Escape');
+    $('stepToggle').checked = false;
+
+    // P2-1: every drive save carries the per-run token header
+    draft.value = 'Token check.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    $('saveTxtButton').click(); await settle();
+    const saved = lastSave(world, 'text');
+    check('queue: drive saves carry the X-RA-Token header',
+      saved !== undefined && Object.prototype.hasOwnProperty.call(saved.headers, 'X-RA-Token'), JSON.stringify(saved && saved.headers));
   }
 
   const passed = results.filter(r => r[0]).length;

@@ -62,11 +62,33 @@ type InvalidVoice struct {
 var voiceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 // safeAssetName rejects anything that could escape the voice directory.
+// windowsReserved are device names that Windows treats specially regardless
+// of extension — writing them produces confusing failures on FAT/NTFS (P3-4).
+var windowsReserved = map[string]bool{
+	"con": true, "prn": true, "aux": true, "nul": true,
+	"com1": true, "com2": true, "com3": true, "com4": true, "com5": true,
+	"com6": true, "com7": true, "com8": true, "com9": true,
+	"lpt1": true, "lpt2": true, "lpt3": true, "lpt4": true, "lpt5": true,
+	"lpt6": true, "lpt7": true, "lpt8": true, "lpt9": true,
+}
+
 func safeAssetName(name string) bool {
 	if name == "" || len(name) > 128 {
 		return false
 	}
 	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		return false
+	}
+	// Hidden files, and Windows's trailing dot/space stripping, both invite
+	// surprises on a portable drive.
+	if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+		return false
+	}
+	base := strings.ToLower(name)
+	if i := strings.IndexByte(base, '.'); i >= 0 {
+		base = base[:i]
+	}
+	if windowsReserved[base] {
 		return false
 	}
 	return name == filepath.Base(name)

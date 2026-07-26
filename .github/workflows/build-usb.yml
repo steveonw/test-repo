@@ -1,5 +1,9 @@
 name: Build Read Aloud USB
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -71,7 +75,7 @@ jobs:
 
       - name: Logic and stress suites (fail fast, before the long build)
         run: |
-          npm install --no-save jsdom
+          npm install --no-save jsdom@29.1.1
           node scripts/web_tests.js . 17391
           node scripts/stress_tests.js .
 
@@ -88,7 +92,7 @@ jobs:
 
       - name: Package the Lessac High voice
         run: |
-          curl -sL "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-high.tar.bz2" -o /tmp/lessac.tar.bz2
+          curl -fsSL --retry 3 --retry-all-errors "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-high.tar.bz2" -o /tmp/lessac.tar.bz2
           mkdir -p /tmp/lessac && tar xf /tmp/lessac.tar.bz2 -C /tmp/lessac
           OUT="build/voices/lessac-high"; mkdir -p "$OUT"
           cp "$(find /tmp/lessac -name '*.onnx' -print -quit)" "$OUT/model.onnx"

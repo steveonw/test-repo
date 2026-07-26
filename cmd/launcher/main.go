@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -74,7 +75,11 @@ func main() {
 		fatal(logger, fmt.Errorf("fingerprint app: %w", err))
 	}
 
-	indexHTML, err := prepareIndex(sharedDir, appFingerprint)
+	runToken, err := newRunToken()
+	if err != nil {
+		fatal(logger, fmt.Errorf("run token: %w", err))
+	}
+	indexHTML, err := prepareIndex(sharedDir, appFingerprint, runToken)
 	if err != nil {
 		fatal(logger, fmt.Errorf("prepare index: %w", err))
 	}
@@ -89,6 +94,10 @@ func main() {
 	mux.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
 		if !validHost(r.Host) {
 			http.Error(w, "invalid host", http.StatusForbidden)
+			return
+		}
+		if !authorizedMutation(r, runToken) {
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		if r.Method != http.MethodPost {
@@ -133,6 +142,12 @@ func main() {
 		}
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizedMutation(r, runToken) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "this request did not come from the Read Aloud page"})
 			return
 		}
 		lastRequest.Store(time.Now().UnixNano())
@@ -446,7 +461,7 @@ func setHeaders(w http.ResponseWriter, path string) {
 	}
 }
 
-func prepareIndex(shared, fp string) ([]byte, error) {
+func prepareIndex(shared, fp, token string) ([]byte, error) {
 	raw, err := os.ReadFile(filepath.Join(shared, "index.html"))
 	if err != nil {
 		return nil, err
@@ -454,7 +469,33 @@ func prepareIndex(shared, fp string) ([]byte, error) {
 	s := string(raw)
 	s = strings.ReplaceAll(s, `href="style.css"`, `href="style.css?v=`+fp+`"`)
 	s = strings.ReplaceAll(s, `src="app.js"`, `src="app.js?v=`+fp+`"`)
+	// The per-run token authorizes mutating requests (/api/save, /quit).
+	// A random website cannot read this page cross-origin, so it can never
+	// learn the token; requiring it as a custom header also forces a CORS
+	// preflight this server does not answer.
+	s = strings.Replace(s, "<head>", "<head>\n  <meta name=\"ra-token\" content=\""+token+"\">", 1)
 	return []byte(s), nil
+}
+
+// newRunToken returns a fresh random token for this server process.
+func newRunToken() (string, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// authorizedMutation enforces the per-run token and same-origin fetch
+// metadata on endpoints that change state (P2-1: CSRF).
+func authorizedMutation(r *http.Request, token string) bool {
+	if r.Header.Get("X-RA-Token") != token {
+		return false
+	}
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
+		return false
+	}
+	return true
 }
 
 // verifyChecksums checks the payload against SHA256SUMS.txt when present.

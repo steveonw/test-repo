@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // The only folders /api/save may write into, all under <drive>/saves/.
@@ -13,6 +14,26 @@ var saveKinds = map[string]bool{
 	"report":  true, // flag reports
 	"text":    true, // draft text, labels, settings strings
 	"audio":   true, // WAV and MP3 narration
+}
+
+// Each kind may only write file types it plausibly produces — path traversal
+// is blocked elsewhere; this stops attacker-chosen executables landing on the
+// stick (P2-2).
+var saveExtensions = map[string][]string{
+	"session": {".raSession", ".json"},
+	"report":  {".txt", ".csv"},
+	"text":    {".txt"},
+	"audio":   {".wav", ".mp3"},
+}
+
+func allowedExtension(kind, name string) bool {
+	lower := strings.ToLower(name)
+	for _, ext := range saveExtensions[kind] {
+		if strings.HasSuffix(lower, strings.ToLower(ext)) {
+			return true
+		}
+	}
+	return false
 }
 
 const autosaveName = "autosave.raSession"
@@ -28,6 +49,9 @@ func writeSave(root, kind, name string, data []byte) (rel string, userErr string
 	// outside its folder.
 	if !safeAssetName(name) {
 		return "", "unsafe file name", nil
+	}
+	if !allowedExtension(kind, name) {
+		return "", "that file type cannot be saved as " + kind, nil
 	}
 	dir := filepath.Join(root, "saves", kind)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

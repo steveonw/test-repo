@@ -30,6 +30,7 @@ if [[ -d "$PROJECT_ROOT/build/voices" ]]; then
   cp -R "$PROJECT_ROOT/build/voices" "$OUTPUT_ROOT/voices"
 fi
 cp "$PROJECT_ROOT/web/start-here.html" "$OUTPUT_ROOT/START HERE.html"
+cp "$PROJECT_ROOT/web/manual.html" "$OUTPUT_ROOT/HOW TO USE.html"
 cp "$LAUNCHERS/readaloud-windows-x64.exe" "$OUTPUT_ROOT/START - WINDOWS.exe"
 cp "$LAUNCHERS/readaloud-linux-x64" "$OUTPUT_ROOT/platform/linux/readaloud-server"
 cp "$LAUNCHERS/readaloud-linux-arm64" "$OUTPUT_ROOT/platform/linux/readaloud-server-arm64"

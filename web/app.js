@@ -282,6 +282,7 @@ function startVoice(voice) {
     speakerId: currentSpeaker,
     noiseScale: preset.noiseScale,
     noiseScaleW: preset.noiseScaleW,
+    debug: new URLSearchParams(location.search).get('debug') === '1',
     voiceId: voice.id,
   });
   const steadyTag = voice.architecture === 'vits' && deliveryPreset === 'steady' ? ' (Steady)' : '';
@@ -498,15 +499,29 @@ const sentenceCache = new Map(); // key -> {samples: Float32Array, sampleRate}
 let cacheBytes = 0;
 const CACHE_LIMIT_BYTES = 800 * 1024 * 1024;
 
+function protectedCacheKeys() {
+  // Never evict what is about to play: stranding segments[playPos] can
+  // deadlock the generator's look-ahead window on book-length documents (P3-1).
+  const keep = new Set();
+  if (mode !== 'idle') {
+    if (segments[playPos]) keep.add(segments[playPos].key);
+    if (segments[playPos + 1]) keep.add(segments[playPos + 1].key);
+  }
+  return keep;
+}
+
 function cacheStore(key, audio) {
   if (sentenceCache.has(key)) return;
   sentenceCache.set(key, audio);
   cacheBytes += audio.samples.length * 4;
   // Evict oldest entries when over the soft cap, but never while a
-  // full render is in progress (export needs every sentence present).
+  // full render is in progress (export needs every sentence present),
+  // and never the sentence about to play or the one after it (P3-1).
   if (mode !== 'rendering') {
+    const keep = protectedCacheKeys();
     for (const [k, v] of sentenceCache) {
       if (cacheBytes <= CACHE_LIMIT_BYTES) break;
+      if (keep.has(k)) continue;
       sentenceCache.delete(k);
       cacheBytes -= v.samples.length * 4;
     }
@@ -598,21 +613,38 @@ function pumpGenerator() {
   postGenerate(genPos++);
 }
 
+let requestId = 0;
+
 function postGenerate(index) {
   const seg = segments[index];
-  requestQueue.push({token: runToken, index, key: seg.key});
-  worker.postMessage({type: 'generate', text: seg.text, sid: currentSpeaker, speed: seg.speed});
+  const id = ++requestId;
+  requestQueue.push({id, token: runToken, index, key: seg.key});
+  worker.postMessage({type: 'generate', id, text: seg.text, sid: currentSpeaker, speed: seg.speed});
+}
+
+// Results and errors are matched to their request by echoed id, so a dropped
+// or reordered reply can never shift audio onto the wrong sentence (P1-1).
+// Replies without an id (older workers, test harnesses) fall back to FIFO.
+function takeRequest(message) {
+  if (message && message.id !== undefined) {
+    const i = requestQueue.findIndex((r) => r.id === message.id);
+    return i >= 0 ? requestQueue.splice(i, 1)[0] : null;
+  }
+  return requestQueue.shift() || null;
 }
 
 function handleResult(message) {
-  const req = requestQueue.shift();
+  const req = takeRequest(message);
   if (!req) return;
   cacheStore(req.key, {samples: message.samples, sampleRate: message.sampleRate});
   // A result is useful whichever run requested it: the cache is
   // content-addressed, so even a cancelled run's result can complete
-  // the sentence the current run is waiting on.
+  // the sentence the current run is waiting on. But it must never *start*
+  // audio while a deliberate pause is in progress: the gap timer or the
+  // step-mode wait owns the start in those states (P1-2).
   if (mode === 'playing') {
-    if (!currentSource && segments[playPos] && sentenceCache.has(segments[playPos].key)) {
+    if (!currentSource && !startingSource && !gapTimer && !awaitingStep &&
+        segments[playPos] && sentenceCache.has(segments[playPos].key)) {
       void playSegment();
     }
   } else if (mode === 'rendering' && req.token === runToken) {
@@ -668,8 +700,18 @@ function syncFocusClass() {
   editorStack.classList.toggle('focus-live', focusToggle.checked && mode === 'playing');
 }
 
+let startingSource = false;
+
 async function playSegment() {
-  const seg = segments[playPos];
+  // Only one start may be in flight, and never on top of playing audio:
+  // the guard is re-checked after the await because resume() opens a window
+  // where playback can move on or a second start can arrive (P1-3).
+  if (startingSource || currentSource) return;
+  startingSource = true;
+  try {
+  const pos = playPos;
+  const seg = segments[pos];
+  if (!seg) return;
   const audio = sentenceCache.get(seg.key);
   if (!audio) return;
   clearResumeIfReached(seg);
@@ -682,7 +724,7 @@ async function playSegment() {
     gainNode.connect(audioContext.destination);
   }
   await audioContext.resume();
-  if (mode !== 'playing') return;
+  if (mode !== 'playing' || pos !== playPos || currentSource) return;
 
   const buffer = audioContext.createBuffer(1, audio.samples.length, audio.sampleRate);
   buffer.getChannelData(0).set(audio.samples);
@@ -704,6 +746,9 @@ async function playSegment() {
   updateButtons();
   source.start();
   pumpGenerator();
+  } finally {
+    startingSource = false;
+  }
 }
 
 let gapTimer = null;
@@ -716,6 +761,7 @@ function advance() {
     return;
   }
   const proceed = () => {
+    if (currentSource || startingSource) return; // something already started
     if (sentenceCache.has(segments[playPos].key)) {
       void playSegment();
     } else {
@@ -1319,11 +1365,19 @@ function blobToBase64(blob) {
   });
 }
 
+// The launcher injects a per-run token into the served page; mutating
+// requests must carry it, so a random website the person is browsing can
+// never write to the drive or shut the app down (CSRF protection).
+function runTokenHeader() {
+  const meta = document.querySelector('meta[name="ra-token"]');
+  return meta ? meta.content : '';
+}
+
 async function saveToDrive(kind, name, blob) {
   const dataBase64 = await blobToBase64(blob);
   const resp = await fetch('/api/save', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: {'Content-Type': 'application/json', 'X-RA-Token': runTokenHeader()},
     body: JSON.stringify({kind, name, dataBase64}),
   });
   let body = null;
@@ -1598,7 +1652,7 @@ function heartbeat() {
     });
 }
 
-const HEARTBEAT_MS = (typeof window !== 'undefined' && window.__RA_HEARTBEAT_MS) || 8 * 60 * 1000;
+const HEARTBEAT_MS = (typeof window !== 'undefined' && window.__RA_HEARTBEAT_MS) || 2 * 60 * 1000; // well inside the idle window even under background-tab throttling
 if (!openedDirectly) setInterval(heartbeat, HEARTBEAT_MS);
 
 function checkIntegrity() {
@@ -2038,7 +2092,7 @@ function handleWorkerMessage(event) {
       handleResult(message);
       break;
     case 'error': {
-      const req = requestQueue.shift();
+      const req = takeRequest(message);
       if (req && req.token === runToken && mode !== 'idle') {
         stopAll({restarting: true});
       }
@@ -2163,7 +2217,7 @@ sessionFile.addEventListener('change', () => {
 quitButton.addEventListener('click', () => {
   if (typeof fetch !== 'function') return;
   stopAll({restarting: true});
-  fetch('/quit', {method: 'POST'})
+  fetch('/quit', {method: 'POST', headers: {'X-RA-Token': runTokenHeader()}})
     .catch(() => { /* the server may already be gone */ })
     .finally(() => {
       ready = false;

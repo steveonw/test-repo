@@ -15,6 +15,7 @@ let tts = null;
 let Module = null;
 let initializing = false;
 let speakerId = 0;
+let debugFlag = false;
 
 // Matches the adaptive count the build patches into the wrapper: use up to
 // this many inference threads, but never more than the machine has cores, so
@@ -54,7 +55,10 @@ function baseModelConfig() {
       vocabJson: '', tokenScoresJson: '', voiceEmbeddingCacheCapacity: 50,
     },
     numThreads: threadCount(),
-    debug: 1,
+    // Off by default: sherpa's debug prints include the text of every
+    // sentence, which would accumulate the whole document in the console —
+    // wrong for a privacy tool. ?debug=1 in the URL turns it back on.
+    debug: debugFlag ? 1 : 0,
     provider: 'cpu',
   };
 }
@@ -101,6 +105,7 @@ self.onmessage = async (e) => {
     try {
       const arch = msg.arch === 'kitten' ? 'kitten' : 'vits';
       speakerId = Number(msg.speakerId) || 0;
+      debugFlag = !!msg.debug;
 
       Module = await createModule({
         locateFile: (path, dir = '') => dir + path,
@@ -147,13 +152,19 @@ self.onmessage = async (e) => {
     }
     initializing = false;
   } else if (msg.type === 'generate') {
-    if (!tts) return;
+    // Every generate gets exactly one reply carrying its id — a silent drop
+    // would desync the page's request queue and put audio on the wrong
+    // sentence for the rest of the session (P1-1).
+    if (!tts) {
+      self.postMessage({type: 'error', id: msg.id, message: 'the voice is not ready yet'});
+      return;
+    }
     try {
       const sid = msg.sid !== undefined ? msg.sid : speakerId;
       const audio = tts.generate({text: msg.text, sid, speed: msg.speed || 1.0});
-      self.postMessage({type: 'sherpa-onnx-tts-result', samples: audio.samples, sampleRate: tts.sampleRate});
+      self.postMessage({type: 'sherpa-onnx-tts-result', id: msg.id, samples: audio.samples, sampleRate: tts.sampleRate});
     } catch (err) {
-      self.postMessage({type: 'error', message: String((err && err.message) || err)});
+      self.postMessage({type: 'error', id: msg.id, message: String((err && err.message) || err)});
     }
   }
 };
