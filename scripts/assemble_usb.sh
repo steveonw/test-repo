@@ -31,6 +31,25 @@ if [[ -d "$PROJECT_ROOT/build/voices" ]]; then
 fi
 cp "$PROJECT_ROOT/web/start-here.html" "$OUTPUT_ROOT/START HERE.html"
 cp "$PROJECT_ROOT/web/manual.html" "$OUTPUT_ROOT/HOW TO USE.html"
+
+# Optional docx-import addon (spec 3.6): opt-in, off by default. The feature
+# exists on a drive only if addons/docx/ does; the base build ships without it.
+if [ "${INCLUDE_DOCX:-0}" = "1" ]; then
+  MAMMOTH_VERSION="1.8.0"
+  mkdir -p "$OUTPUT_ROOT/addons/docx"
+  curl -fsSL --retry 3 --retry-all-errors \
+    "https://unpkg.com/mammoth@${MAMMOTH_VERSION}/mammoth.browser.min.js" \
+    -o "$OUTPUT_ROOT/addons/docx/mammoth.browser.min.js"
+  curl -fsSL --retry 3 --retry-all-errors \
+    "https://unpkg.com/mammoth@${MAMMOTH_VERSION}/LICENSE" \
+    -o "$OUTPUT_ROOT/addons/docx/LICENSE.txt"
+  {
+    echo ""
+    echo "addons/docx: mammoth.js ${MAMMOTH_VERSION} (BSD-2-Clause)"
+    echo "  https://github.com/mwilliamson/mammoth.js — license in addons/docx/LICENSE.txt"
+  } >> "$OUTPUT_ROOT/LICENSES/NOTICE.txt"
+  echo "docx addon included (mammoth ${MAMMOTH_VERSION})"
+fi
 cp "$LAUNCHERS/readaloud-windows-x64.exe" "$OUTPUT_ROOT/START - WINDOWS.exe"
 cp "$LAUNCHERS/readaloud-linux-x64" "$OUTPUT_ROOT/platform/linux/readaloud-server"
 cp "$LAUNCHERS/readaloud-linux-arm64" "$OUTPUT_ROOT/platform/linux/readaloud-server-arm64"

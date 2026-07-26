@@ -94,6 +94,9 @@ function makeWorld(preSeed) {
       world.saves.push(req);
       return Promise.resolve({ok: true, json: () => Promise.resolve({saved: `saves/${req.kind}/${req.name}`})});
     }
+    if (String(url) === '/api/addons') {
+      return Promise.resolve({ok: true, json: () => Promise.resolve({addons: world.addonsList || []})});
+    }
     if (String(url) === '/api/autosave') {
       return Promise.resolve({ok: true, text: () => Promise.resolve(world.autosaveFile || '{"none":true}')});
     }
@@ -1246,6 +1249,63 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     const saved = lastSave(world, 'text');
     check('queue: drive saves carry the X-RA-Token header',
       saved !== undefined && Object.prototype.hasOwnProperty.call(saved.headers, 'X-RA-Token'), JSON.stringify(saved && saved.headers));
+  }
+
+  /* ============ docx addon (phase 6) ============ */
+  {
+    // Without the addon: .docx is refused with a hint, .txt still works
+    const world = await makeWorld();
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    await settle();
+    const draft = $('draft');
+    const drop = (file) => {
+      const ev = new w.Event('drop', {bubbles: true, cancelable: true});
+      ev.dataTransfer = {files: [file]};
+      draft.dispatchEvent(ev);
+    };
+    drop(new w.File(['PK'], 'report.docx', {type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}));
+    await settle();
+    check('addons: docx refused with a hint when the addon is absent',
+      draft.value === '' && /optional addon/.test($('statusTitle').textContent) && /addons\/docx/.test($('statusDetail').textContent),
+      $('statusTitle').textContent + ' | ' + $('statusDetail').textContent);
+  }
+  {
+    // With the addon: the extractor loads (pre-seeded, as script tags do not
+    // execute in the harness) and the text flows through the import path
+    const world = await makeWorld((wd) => {
+      wd.addonsList = ['docx'];
+      wd.w.mammoth = {extractRawText: async ({arrayBuffer}) => {
+        wd.gotBuffer = arrayBuffer instanceof wd.w.ArrayBuffer && arrayBuffer.byteLength > 0;
+        return {value: 'Extracted document text.\n\n\n\nSecond paragraph.'};
+      }};
+    });
+    const {w} = world;
+    const $ = (id) => w.document.getElementById(id);
+    world.workerInstance.onmessage({data: {type: 'sherpa-onnx-tts-ready', numSpeakers: 1}});
+    await settle();
+    const draft = $('draft');
+    const drop = (file) => {
+      const ev = new w.Event('drop', {bubbles: true, cancelable: true});
+      ev.dataTransfer = {files: [file]};
+      draft.dispatchEvent(ev);
+    };
+    drop(new w.File(['PKfakezipbytes'], 'chapter.docx', {type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}));
+    await settle();
+    check('addons: docx imports through the extractor into memory',
+      draft.value === 'Extracted document text.\n\nSecond paragraph.' && world.gotBuffer === true,
+      JSON.stringify(draft.value));
+    check('addons: import announces itself like any file open', /Opened chapter\.docx/.test($('statusTitle').textContent), $('statusTitle').textContent);
+
+    // a dirty draft still gets the replace banner, exactly like txt drops
+    draft.value = 'Precious unsaved rewrite.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    drop(new w.File(['PK2'], 'other.docx', {type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}));
+    await settle();
+    check('addons: dirty draft raises the replace banner for docx too',
+      $('importBanner').hidden === false && draft.value === 'Precious unsaved rewrite.');
+    $('importNo').click();
   }
 
   const passed = results.filter(r => r[0]).length;

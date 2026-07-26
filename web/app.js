@@ -1949,6 +1949,53 @@ function saveDraftText() {
   void saveOrDownload('text', 'read-aloud-draft.txt', new Blob([draft.value], {type: 'text/plain'}), 'Draft saved');
 }
 
+// Optional addons: features that exist only when their folder is on the
+// drive (spec 3.6). The page learns which are present at boot and lazy-loads
+// their code (same-origin, so the CSP allows it) on first use.
+let installedAddons = new Set();
+
+function probeAddons() {
+  if (openedDirectly || typeof fetch !== 'function') return;
+  fetch('/api/addons', {cache: 'no-store'})
+    .then((r) => (r.ok ? r.json() : null))
+    .then((body) => {
+      if (body && Array.isArray(body.addons)) installedAddons = new Set(body.addons.map(String));
+    })
+    .catch(() => { /* no launcher, no addons */ });
+}
+
+let mammothLoading = null;
+
+function loadDocxAddon() {
+  if (window.mammoth) return Promise.resolve();
+  if (mammothLoading) return mammothLoading;
+  mammothLoading = new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = 'addons/docx/mammoth.browser.min.js';
+    el.onload = () => (window.mammoth ? resolve() : reject(new Error('the docx addon did not load')));
+    el.onerror = () => reject(new Error('the docx addon could not be loaded from the drive'));
+    document.head.appendChild(el);
+  }).catch((err) => { mammothLoading = null; throw err; });
+  return mammothLoading;
+}
+
+async function importDocx(file) {
+  setStatus('loading', 'Reading the Word document…', 'The file is being converted in memory; nothing is uploaded.');
+  try {
+    await loadDocxAddon();
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await window.mammoth.extractRawText({arrayBuffer});
+    const text = String(result && result.value || '').replace(/\n{3,}/g, '\n\n').trim();
+    if (!text) {
+      setStatus('error', 'Nothing readable found', 'That document appears to contain no text.');
+      return;
+    }
+    offerImport(text, String(file.name || 'document.docx'));
+  } catch (err) {
+    setStatus('error', 'Could not read the Word document', String((err && err.message) || err));
+  }
+}
+
 // Dropped files are read straight into memory — no upload, no temp files.
 let pendingImport = null;
 
@@ -1979,6 +2026,14 @@ function offerImport(text, name) {
 function handleDroppedFile(file) {
   if (!file) return;
   const name = String(file.name || 'file');
+  if (/\.docx$/i.test(name)) {
+    if (installedAddons.has('docx')) {
+      void importDocx(file);
+    } else {
+      setStatus('ready', 'Word import is an optional addon', 'This drive does not have the docx addon installed. Drop a .txt or .md file, or add an addons/docx folder to the drive.');
+    }
+    return;
+  }
   if (!/\.(txt|md)$/i.test(name)) {
     setStatus('ready', 'That file type cannot be opened', 'Drop a .txt or .md file onto the draft.');
     return;
@@ -2384,6 +2439,7 @@ refreshFlags();
 checkIntegrity();
 loadSettingsFile();
 loadVoiceCatalog();
+probeAddons();
 offerAutosaveRestore();
 cleanSnapshot = sessionFingerprint();
 

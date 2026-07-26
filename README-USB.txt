@@ -30,6 +30,10 @@ written to the computer you plug into. If the drive itself cannot be written
 (removed or write-protected), the file falls back to that computer's
 Downloads folder and the status line tells you so.
 
+Optional Word import: if an "addons/docx" folder exists on this drive, .docx
+files can be dropped straight onto the text box. Drives built without the
+folder simply do not have the feature; deleting the folder removes it.
+
 Autosave is OFF by default. Turning it on (in Settings & sessions) writes a
 rolling session file to this drive once a minute and shows a green indicator
 while active.

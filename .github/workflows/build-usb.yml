@@ -11,6 +11,10 @@ on:
         description: "Piper voice id override (e.g. vits-piper-en_US-amy-low for a compact build)"
         required: false
         default: ""
+      include_docx:
+        description: "Include the optional Word (.docx) import addon"
+        required: false
+        default: "0"
       tts_threads:
         description: Inference threads baked into the build (1 disables threading)
         required: false
@@ -99,7 +103,7 @@ jobs:
           cp "$(find /tmp/lessac -name tokens.txt -print -quit)" "$OUT/tokens.txt"
           printf '{\n "schemaVersion": 1, "id": "lessac-high", "name": "Lessac High",\n "language": "English", "locale": "en-US", "engine": "sherpa-vits",\n "architecture": "vits", "model": "model.onnx", "tokens": "tokens.txt",\n "quality": "high", "quantization": "none", "sampleRate": 22050,\n "minimumRuntimeVersion": "1"\n}\n' > "$OUT/voice.json"
           cp -R build/voices "dist/ReadAloudUSB/voices" 2>/dev/null || true
-          ./scripts/assemble_usb.sh
+          INCLUDE_DOCX="${{ github.event.inputs.include_docx || '0' }}" ./scripts/assemble_usb.sh
 
       - name: Launcher unit tests
         run: go test ./cmd/...

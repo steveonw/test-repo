@@ -109,6 +109,30 @@ func main() {
 		quitOnce.Do(func() { close(quitRequested) })
 	})
 
+	addonsDir := filepath.Join(filepath.Dir(sharedDir), "addons")
+	addonFS := http.StripPrefix("/addons/", http.FileServer(http.Dir(addonsDir)))
+	mux.HandleFunc("/addons/", func(w http.ResponseWriter, r *http.Request) {
+		if !validHost(r.Host) {
+			http.Error(w, "invalid host", http.StatusForbidden)
+			return
+		}
+		lastRequest.Store(time.Now().UnixNano())
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		addonFS.ServeHTTP(w, r)
+	})
+
+	mux.HandleFunc("/api/addons", func(w http.ResponseWriter, r *http.Request) {
+		if !validHost(r.Host) {
+			http.Error(w, "invalid host", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(map[string]any{"addons": scanAddons(addonsDir)})
+	})
+
 	voicesDir := filepath.Join(filepath.Dir(sharedDir), "voices")
 	voiceFS := http.StripPrefix("/voices/", http.FileServer(http.Dir(voicesDir)))
 	mux.HandleFunc("/voices/", func(w http.ResponseWriter, r *http.Request) {
