@@ -2026,6 +2026,10 @@ function offerImport(text, name) {
 function handleDroppedFile(file) {
   if (!file) return;
   const name = String(file.name || 'file');
+  if (/\.doc$/i.test(name)) {
+    setStatus('ready', 'That is the older Word format', 'This .doc file predates .docx. Open it in Word (or LibreOffice) and use Save As → Word Document (.docx), then drop it here.');
+    return;
+  }
   if (/\.docx$/i.test(name)) {
     if (installedAddons.has('docx')) {
       void importDocx(file);

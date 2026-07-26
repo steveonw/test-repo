@@ -1265,10 +1265,20 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
       ev.dataTransfer = {files: [file]};
       draft.dispatchEvent(ev);
     };
+    drop(new w.File(['old'], 'legacy.doc', {type: 'application/msword'}));
+    await settle();
+    check('addons: legacy .doc gets the save-as-docx explanation',
+      draft.value === '' && /older Word format/.test($('statusTitle').textContent) && /Save As/.test($('statusDetail').textContent),
+      $('statusTitle').textContent + ' | ' + $('statusDetail').textContent);
     drop(new w.File(['PK'], 'report.docx', {type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}));
     await settle();
     check('addons: docx refused with a hint when the addon is absent',
       draft.value === '' && /optional addon/.test($('statusTitle').textContent) && /addons\/docx/.test($('statusDetail').textContent),
+      $('statusTitle').textContent + ' | ' + $('statusDetail').textContent);
+    drop(new w.File(['old'], 'legacy.doc', {type: 'application/msword'}));
+    await settle();
+    check('addons: old .doc gets save-as-docx guidance, not a generic refusal',
+      draft.value === '' && /older Word format/.test($('statusTitle').textContent) && /Save As/.test($('statusDetail').textContent),
       $('statusTitle').textContent + ' | ' + $('statusDetail').textContent);
   }
   {
