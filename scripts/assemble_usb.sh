@@ -31,6 +31,7 @@ if [[ -d "$PROJECT_ROOT/build/voices" ]]; then
 fi
 cp "$PROJECT_ROOT/web/start-here.html" "$OUTPUT_ROOT/START HERE.html"
 cp "$PROJECT_ROOT/web/manual.html" "$OUTPUT_ROOT/HOW TO USE.html"
+cp "$PROJECT_ROOT/LICENSES/NOTICE.txt" "$OUTPUT_ROOT/LICENSES/NOTICE.txt"
 
 # Optional docx-import addon (spec 3.6): opt-in, off by default. The feature
 # exists on a drive only if addons/docx/ does; the base build ships without it.
@@ -55,7 +56,6 @@ cp "$LAUNCHERS/readaloud-linux-x64" "$OUTPUT_ROOT/platform/linux/readaloud-serve
 cp "$LAUNCHERS/readaloud-linux-arm64" "$OUTPUT_ROOT/platform/linux/readaloud-server-arm64"
 cp "$LAUNCHERS/readaloud-macos-universal" "$OUTPUT_ROOT/START - MACOS.app/Contents/MacOS/readaloud"
 cp "$PROJECT_ROOT/packaging/macos/Info.plist" "$OUTPUT_ROOT/START - MACOS.app/Contents/Info.plist"
-cp "$PROJECT_ROOT/LICENSES/NOTICE.txt" "$OUTPUT_ROOT/LICENSES/NOTICE.txt"
 cp "$PROJECT_ROOT/packaging/linux/start-linux.sh" "$OUTPUT_ROOT/START - LINUX.sh"
 cp "$PROJECT_ROOT/README-USB.txt" "$OUTPUT_ROOT/README.txt"
 

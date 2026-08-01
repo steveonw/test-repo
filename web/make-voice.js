@@ -5,7 +5,7 @@
 
 const $ = (id) => document.getElementById(id);
 let modelBuf = null, tokensBuf = null, voicesBuf = null, cfg = null;
-let sniffedKitten = false;   // model header says model_type=kitten-tts
+let modelFamily = null; // 'vits', 'kitten', or 'kokoro' when metadata is recognizable
 
 /* ---------- CRC32 + store-only zip writer (no dependencies) ---------- */
 const CRC_TABLE = (() => {
@@ -64,7 +64,7 @@ function makeZip(files) { // [{name, data:Uint8Array}] -> Blob (store-only)
 
 /* ------------------------- manifest + rules ------------------------- */
 const ID_RULE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-function isKitten() { return !!voicesBuf; }
+function isKitten() { return modelFamily === 'kitten'; }
 
 function buildManifest(id, name, config, opts = {}) {
   const kitten = opts.kitten !== undefined ? opts.kitten : isKitten();
@@ -94,6 +94,7 @@ function buildManifest(id, name, config, opts = {}) {
 function validateAll() {
   const id = $('voiceId').value.trim();
   const kitten = isKitten();
+  const kokoro = modelFamily === 'kokoro';
   const checks = [
     ['A model file (.onnx) is loaded', !!modelBuf],
     ['The model looks big enough to be real', !!modelBuf && modelBuf.byteLength > 1000000],
@@ -101,20 +102,26 @@ function validateAll() {
     ['The id uses only lowercase letters, digits, and hyphens', ID_RULE.test(id)],
     ['A display name is set', $('voiceName').value.trim().length > 0],
   ];
-  if (sniffedKitten || kitten) {
+  if (kokoro) {
+    checks.push(['Kokoro models need a Kokoro-enabled Read Aloud runtime', false]);
+  } else if (kitten) {
     // A kitten model without its style rows will load and then fail, so this
     // is a hard requirement rather than a suggestion.
     checks.push(['KittenTTS model — voices.bin (style rows) is loaded', !!voicesBuf]);
     checks.push(['voices.bin looks like real style data', !!voicesBuf && voicesBuf.byteLength > 100000]);
+    checks.push(['Piper config is not mixed into this KittenTTS package', !cfg]);
   } else {
     checks.push(['Piper config found (exact sample rate and language)', !!cfg, true]);
+    checks.push(['Piper VITS packages do not contain voices.bin', !voicesBuf]);
   }
   const fam = $('family');
   if (fam) {
-    fam.textContent = kitten
+    fam.textContent = kokoro
+      ? 'Kokoro model detected — this runtime does not package Kokoro yet'
+      : kitten
       ? 'KittenTTS package — model + tokens + voices.bin'
-      : (sniffedKitten ? 'looks like KittenTTS — add voices.bin' : 'Piper VITS package — model + tokens');
-    fam.className = 'family ' + (kitten ? 'kitten' : (sniffedKitten ? 'warnfam' : 'vits'));
+      : 'Piper VITS package — model + tokens';
+    fam.className = 'family ' + (kitten ? 'kitten' : (kokoro ? 'warnfam' : 'vits'));
   }
   const spk = $('speakerRow');
   if (spk) spk.hidden = true; // shown by the test bench once the engine reports the speaker count
@@ -135,14 +142,17 @@ function sniffArchitecture(buf) {
   const n = buf.byteLength;
   const head = dec.decode(new Uint8Array(buf, 0, Math.min(n, win)));
   const tail = n > win ? dec.decode(new Uint8Array(buf, n - win, win)) : '';
-  return /kitten-tts/i.test(head) || /kitten-tts/i.test(tail);
+  const metadata = head + '\n' + tail;
+  if (/kitten-tts/i.test(metadata)) return 'kitten';
+  if (/kokoro/i.test(metadata)) return 'kokoro';
+  return 'vits';
 }
 
 async function readFile(file, kind) {
   const buf = await file.arrayBuffer();
   if (kind === 'model') {
     modelBuf = buf;
-    try { sniffedKitten = sniffArchitecture(buf); } catch (_) { sniffedKitten = false; }
+    try { modelFamily = sniffArchitecture(buf); } catch (_) { modelFamily = 'vits'; }
   }
   if (kind === 'tokens') tokensBuf = buf;
   if (kind === 'voices') voicesBuf = buf;
@@ -151,10 +161,43 @@ async function readFile(file, kind) {
   }
   validateAll();
 }
+
+function clearLoaded(kind) {
+  if (kind === 'model') {
+    modelBuf = null;
+    modelFamily = null;
+  } else if (kind === 'tokens') {
+    tokensBuf = null;
+  } else if (kind === 'voices') {
+    voicesBuf = null;
+  } else if (kind === 'config') {
+    cfg = null;
+  }
+}
+
 for (const [inputId, kind] of [['modelFile', 'model'], ['tokensFile', 'tokens'], ['voicesFile', 'voices'], ['configFile', 'config']]) {
-  $(inputId).addEventListener('change', () => {
+  $(inputId).addEventListener('change', async () => {
     const f = $(inputId).files && $(inputId).files[0];
-    if (f) readFile(f, kind);
+    if (kind === 'model') {
+      // A model defines the package family. Never retain supporting files
+      // selected for a previous model, even when the new model has the same
+      // filename.
+      for (const dependent of ['tokensFile', 'voicesFile', 'configFile']) {
+        $(dependent).value = '';
+      }
+      tokensBuf = null;
+      voicesBuf = null;
+      cfg = null;
+    }
+    if (f) {
+      await readFile(f, kind);
+    } else {
+      clearLoaded(kind);
+      if (kind === 'model') {
+        modelFamily = null;
+      }
+      validateAll();
+    }
   });
 }
 $('voiceName').addEventListener('input', () => {

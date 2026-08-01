@@ -55,7 +55,16 @@ func main() {
 	}
 	integrityChecked, integrityBad := verifyChecksums(sharedDir, logger)
 
-	if existingURL, ok := findExistingServer(sharedDir); ok {
+	appFingerprint, err := fingerprint(sharedDir)
+	if err != nil {
+		fatal(logger, fmt.Errorf("fingerprint app: %w", err))
+	}
+	installFingerprint, err := installationFingerprint(sharedDir)
+	if err != nil {
+		fatal(logger, fmt.Errorf("fingerprint installation: %w", err))
+	}
+
+	if existingURL, ok := findExistingServer(appFingerprint, installFingerprint); ok {
 		if !*noBrowser {
 			_ = openBrowser(existingURL)
 		}
@@ -68,11 +77,6 @@ func main() {
 		if err != nil {
 			fatal(logger, fmt.Errorf("start local server: %w", err))
 		}
-	}
-
-	appFingerprint, err := fingerprint(sharedDir)
-	if err != nil {
-		fatal(logger, fmt.Errorf("fingerprint app: %w", err))
 	}
 
 	runToken, err := newRunToken()
@@ -241,7 +245,7 @@ func main() {
 				integrity = fmt.Sprintf("failed:%d/%d", integrityBad, integrityChecked)
 			}
 		}
-		_, _ = io.WriteString(w, "readaloud:"+appFingerprint+"\nintegrity:"+integrity)
+		_, _ = io.WriteString(w, "readaloud:"+appFingerprint+":"+installFingerprint+"\nintegrity:"+integrity)
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -416,11 +420,26 @@ func fingerprint(shared string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }
 
-func findExistingServer(shared string) (string, bool) {
-	fp, err := fingerprint(shared)
+// installationFingerprint distinguishes otherwise identical copies of the
+// application on different removable drives. It intentionally hashes the
+// canonical drive root instead of exposing that path through /health.
+func installationFingerprint(shared string) (string, error) {
+	root, err := filepath.Abs(filepath.Dir(shared))
 	if err != nil {
-		return "", false
+		return "", err
 	}
+	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
+		root = resolved
+	}
+	root = filepath.Clean(root)
+	if runtime.GOOS == "windows" {
+		root = strings.ToLower(root)
+	}
+	sum := sha256.Sum256([]byte(root))
+	return hex.EncodeToString(sum[:])[:16], nil
+}
+
+func findExistingServer(appFingerprint, installFingerprint string) (string, bool) {
 	client := http.Client{Timeout: 600 * time.Millisecond}
 	resp, err := client.Get("http://" + preferredAddr + "/health")
 	if err != nil {
@@ -432,8 +451,8 @@ func findExistingServer(shared string) (string, bool) {
 		return "", false
 	}
 	firstLine, _, _ := strings.Cut(strings.TrimSpace(string(body)), "\n")
-	if firstLine == "readaloud:"+fp {
-		return "http://" + preferredAddr + "/?edition=" + editionID + "&build=" + fp, true
+	if firstLine == "readaloud:"+appFingerprint+":"+installFingerprint {
+		return "http://" + preferredAddr + "/?edition=" + editionID + "&build=" + appFingerprint, true
 	}
 	return "", false
 }
@@ -534,24 +553,38 @@ func verifyChecksums(shared string, logger *log.Logger) (checked, bad int) {
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(string(raw), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) != 2 {
+		for lineNumber, line := range strings.Split(string(raw), "\n") {
+			line = strings.TrimSuffix(line, "\r")
+			if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
 				continue
 			}
-			want, name := strings.ToLower(fields[0]), strings.TrimPrefix(fields[1], "*")
-			target := filepath.Join(dir, filepath.FromSlash(name))
+			checked++
+			want, name, ok := parseChecksumLine(line)
+			if !ok {
+				bad++
+				logger.Printf("integrity warning: malformed entry on line %d of %s", lineNumber+1, sumsPath)
+				continue
+			}
+			target, ok := checksumTarget(dir, name)
+			if !ok {
+				bad++
+				logger.Printf("integrity warning: unsafe path %q in SHA256SUMS.txt", name)
+				continue
+			}
 			f, err := os.Open(target)
 			if err != nil {
+				bad++
+				logger.Printf("integrity warning: %s is missing or unreadable", name)
 				continue
 			}
 			h := sha256.New()
 			_, copyErr := io.Copy(h, f)
 			_ = f.Close()
 			if copyErr != nil {
+				bad++
+				logger.Printf("integrity warning: %s could not be read completely", name)
 				continue
 			}
-			checked++
 			if hex.EncodeToString(h.Sum(nil)) != want {
 				bad++
 				logger.Printf("integrity warning: %s does not match SHA256SUMS.txt", name)
@@ -567,6 +600,41 @@ func verifyChecksums(shared string, logger *log.Logger) (checked, bad int) {
 		return checked, bad
 	}
 	return 0, 0
+}
+
+// parseChecksumLine accepts the format emitted by GNU sha256sum, including
+// filenames containing spaces: 64 hex digits, then "  " (or " *"), then
+// the filename. Blank lines and comments are filtered by the caller.
+func parseChecksumLine(line string) (want, name string, ok bool) {
+	if len(line) < 67 || (line[64:66] != "  " && line[64:66] != " *") {
+		return "", "", false
+	}
+	want = strings.ToLower(line[:64])
+	if _, err := hex.DecodeString(want); err != nil {
+		return "", "", false
+	}
+	name = line[66:]
+	if name == "" {
+		return "", "", false
+	}
+	return want, name, true
+}
+
+func checksumTarget(root, name string) (string, bool) {
+	name = filepath.FromSlash(name)
+	if filepath.IsAbs(name) {
+		return "", false
+	}
+	clean := filepath.Clean(name)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	target := filepath.Join(root, clean)
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return target, true
 }
 
 func openBrowser(url string) error {

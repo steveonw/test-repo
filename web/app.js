@@ -1836,10 +1836,14 @@ function sessionJson() {
   }, null, 1) + '\n';
 }
 
-function saveSession() {
-  void saveOrDownload('session', 'read-aloud-session.json',
-    new Blob([sessionJson()], {type: 'application/json'}), 'Session saved');
-  cleanSnapshot = sessionFingerprint();
+async function saveSession() {
+  const json = sessionJson();
+  const snapshot = sessionFingerprint();
+  await saveOrDownload('session', 'read-aloud-session.json',
+    new Blob([json], {type: 'application/json'}), 'Session saved');
+  // Do not suppress the close warning if the person edited the draft while
+  // the drive write was still in progress.
+  if (sessionFingerprint() === snapshot) cleanSnapshot = snapshot;
 }
 
 /* ------------------------ Autosave (opt-in) ----------------------- */
@@ -1851,17 +1855,36 @@ function saveSession() {
 const AUTOSAVE_MS = window.__RA_AUTOSAVE_MS || 60000;
 let autosaveTimer = null;
 let autosaveWarned = false;
+let autosaveInFlight = null;
+let autosavePending = false;
 
 async function autosaveNow() {
   if (!autosaveToggle.checked || openedDirectly || !draft.value.trim()) return;
+  if (autosaveInFlight) {
+    // Coalesce any number of overlapping timer/Stop requests into one final
+    // save of the newest session after the current write completes.
+    autosavePending = true;
+    return autosaveInFlight;
+  }
+  autosaveInFlight = (async () => {
+    try {
+      await saveToDrive('session', 'autosave.raSession', new Blob([sessionJson()], {type: 'application/json'}));
+      autosaveWarned = false;
+    } catch (err) {
+      if (!autosaveWarned) {
+        autosaveWarned = true;
+        setStatus(statusDot.classList[1] || 'ready', statusTitle.textContent,
+          `Autosave could not write to the drive (${String(err.message || err)}).`);
+      }
+    }
+  })();
   try {
-    await saveToDrive('session', 'autosave.raSession', new Blob([sessionJson()], {type: 'application/json'}));
-    autosaveWarned = false;
-  } catch (err) {
-    if (!autosaveWarned) {
-      autosaveWarned = true;
-      setStatus(statusDot.classList[1] || 'ready', statusTitle.textContent,
-        `Autosave could not write to the drive (${String(err.message || err)}).`);
+    await autosaveInFlight;
+  } finally {
+    autosaveInFlight = null;
+    if (autosavePending) {
+      autosavePending = false;
+      void autosaveNow();
     }
   }
 }
@@ -2152,6 +2175,16 @@ function handleWorkerMessage(event) {
       break;
     case 'error': {
       const req = takeRequest(message);
+      // A cancelled run can still report an error after a new run has begun.
+      // Remove that stale request and immediately let the current run submit
+      // its own request for the same cache key.
+      if (req && req.token !== runToken) {
+        pumpGenerator();
+        break;
+      }
+      // Ignore duplicate or unknown generated replies. Initialization errors
+      // have no request id and still need to be shown.
+      if (message.id !== undefined && !req) break;
       if (req && req.token === runToken && mode !== 'idle') {
         stopAll({restarting: true});
       }
@@ -2220,7 +2253,7 @@ settingsDownload.addEventListener('click', () => {
   void saveOrDownload('text', 'settings.txt',
     new Blob([settingsString() + '\n'], {type: 'text/plain'}), 'Settings saved');
 });
-sessionSave.addEventListener('click', saveSession);
+sessionSave.addEventListener('click', () => { void saveSession(); });
 sessionOpen.addEventListener('click', () => sessionFile.click());
 copyAllButton.addEventListener('click', copyAllText);
 saveTxtButton.addEventListener('click', saveDraftText);

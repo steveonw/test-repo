@@ -179,6 +179,26 @@ const check = (n, c, x='') => { results.push([c, n]); if (!c) console.log('  det
     draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
     check('editing stops playback', $('stopButton').disabled && world.liveSources.length === 0);
     check('editing keeps user caret', draft.selectionStart === 5);
+
+    // A cancelled request can fail after a new run begins with the same
+    // sentence. The stale error must release the dedupe wait and let the new
+    // run issue its own request instead of hanging forever.
+    draft.value = 'Retry this sentence.';
+    draft.dispatchEvent(new w.Event('input', {bubbles: true})); await tick();
+    draft.setSelectionRange(0, 0);
+    const beforeRetry = world.workerInstance.received.length;
+    key('F8'); await tick();
+    const staleReq = world.workerInstance.received[beforeRetry];
+    key('Escape'); await tick();
+    key('F8'); await tick();
+    check('stale error: same-key request waits for old reply', world.workerInstance.received.length === beforeRetry + 1);
+    world.workerInstance.onmessage({data: {type: 'error', id: staleReq.id, message: 'cancelled request failed'}});
+    await tick();
+    check('stale error: current run retries instead of stalling',
+      world.workerInstance.received.length === beforeRetry + 2 &&
+      world.workerInstance.received[beforeRetry + 1].text === 'Retry this sentence.' &&
+      $('statusTitle').textContent !== 'Voice error', $('statusTitle').textContent);
+    key('Escape'); await tick();
   }
 
   /* ============ narration suite ============ */

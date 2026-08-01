@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -49,10 +51,10 @@ func TestWriteSave(t *testing.T) {
 		{"session", `a\b.json`},
 		{"session", ""},
 		{"audio", strings.Repeat("n", 200) + ".wav"},
-		{"text", "payload.hta"},   // P2-2: attacker-chosen file types
+		{"text", "payload.hta"}, // P2-2: attacker-chosen file types
 		{"audio", "setup.exe"},
 		{"report", "script.js"},
-		{"session", "CON.json"},   // P3-4: Windows reserved device names
+		{"session", "CON.json"}, // P3-4: Windows reserved device names
 		{"text", "nul.txt"},
 		{"text", ".hidden.txt"},
 		{"text", "trailingdot.txt."},
@@ -68,5 +70,49 @@ func TestWriteSave(t *testing.T) {
 
 	if _, ok := readAutosave(t.TempDir()); ok {
 		t.Fatal("readAutosave must report absence on a fresh drive")
+	}
+}
+
+func TestConcurrentSaveWritesStayComplete(t *testing.T) {
+	root := t.TempDir()
+	const writers = 24
+	const payloadSize = 128 * 1024
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(value byte) {
+			defer wg.Done()
+			payload := bytes.Repeat([]byte{value}, payloadSize)
+			if _, userErr, sysErr := writeSave(root, "session", autosaveName, payload); userErr != "" || sysErr != nil {
+				t.Errorf("write failed: %q %v", userErr, sysErr)
+			}
+		}(byte(i + 1))
+	}
+	wg.Wait()
+
+	got, err := os.ReadFile(filepath.Join(root, "saves", "session", autosaveName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != payloadSize {
+		t.Fatalf("partial final save: got %d bytes, want %d", len(got), payloadSize)
+	}
+	if !bytes.Equal(got, bytes.Repeat([]byte{got[0]}, payloadSize)) {
+		t.Fatal("final save contains interleaved data from concurrent writers")
+	}
+}
+
+func TestReadAutosaveFallsBackToBackup(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "saves", "session")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, autosaveName+".bak"), []byte("last complete save"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := readAutosave(root)
+	if !ok || string(got) != "last complete save" {
+		t.Fatalf("backup autosave not recovered: ok=%v data=%q", ok, got)
 	}
 }
